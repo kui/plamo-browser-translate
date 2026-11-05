@@ -7,7 +7,6 @@ const size = process.argv[2] || "2b";
 const quant = process.env.QUANT || "Q4_K_M";
 const port = process.env.PORT || "8000";
 const repo = `pfnet/plamo-3-translate-${size}-GGUF`;
-// リポジトリの中に置くと、git worktree ごとに同じモデルを取得し直し、作業後も大きなファイルが残る。
 const modelsDir = process.env.MODELS_DIR || join(homedir(), ".cache", "plamo-browser-translate", "models");
 const dir = join(modelsDir, `plamo-3-translate-${size}-GGUF`);
 const ggufName = `plamo-3-translate-${size}-${quant}.gguf`;
