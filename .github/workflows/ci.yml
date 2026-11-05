@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   check:
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -17,10 +18,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v5
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           install_args: bun
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run kiss-import --fresh
-      - run: bun run verify --hooks-only
+      - run: bun run verify --offline

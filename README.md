@@ -91,10 +91,10 @@ bun install
 bun run verify
 ```
 
-サーバーを起動できないときは、往復を除いたフック単体の検査だけを実行できる。
+サーバーを起動できないときは、往復を除いて、フック単体とインポート用ファイルの中身だけを確かめられる。
 
 ```bash
-bun run verify --hooks-only
+bun run verify --offline
 ```
 
 ## 制約
