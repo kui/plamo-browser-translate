@@ -1,5 +1,7 @@
 // KISS Translator と同じ方法（Sval サンドボックスで `exports.reqHook = <source>`）でフックを読み込み、
-// フック単体の振る舞いと、起動中の llama-server との往復を確かめる。
+// フック単体の振る舞い、インポート用ファイルの中身、起動中の llama-server との往復を確かめる。
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Sval from "sval";
 
@@ -7,9 +9,10 @@ type ReqHook = (args: { url: string; texts: string[]; fromLang: string; toLang: 
   url: string;
   method: string;
   headers: Record<string, string>;
-  body: { chat_template_kwargs: unknown };
+  body: { messages: [{ content: string }]; chat_template_kwargs: unknown };
 }>;
 type ResHook = (args: { res: unknown }) => Promise<{ translations: [[string]] }>;
+type Setting = { transApis: { apiSlug: string; reqHook: string; resHook: string }[] };
 type Case = {
   fromLang: string;
   toLang: string;
@@ -18,10 +21,12 @@ type Case = {
   lang: (translation: string) => boolean;
 };
 
+const offline = process.argv.slice(2).includes("--offline");
 const url = process.env.URL || "http://127.0.0.1:8000/v1/chat/completions";
+const source = (file: string) => Bun.file(join(import.meta.dir, file)).text();
 const load = async <T>(name: string, file: string): Promise<T> => {
   const interp = new Sval({ ecmaVer: "latest", sourceType: "script", sandBox: true });
-  interp.run(`exports.${name} = ${await Bun.file(join(import.meta.dir, file)).text()}`);
+  interp.run(`exports.${name} = ${await source(file)}`);
   return interp.exports[name] as T;
 };
 const reqHook = await load<ReqHook>("reqHook", "request-hook.js");
@@ -32,12 +37,12 @@ const check = (ok: boolean, label: string, detail = "") => {
   if (!ok) failed++;
   console.log(`${ok ? "OK  " : "FAIL"} ${label}${detail ? `\n     ${detail}` : ""}`);
 };
-const rejects = async (fn: () => Promise<unknown>) => {
+const rejects = async (fn: () => Promise<unknown>, message = /./) => {
   try {
     await fn();
     return false;
-  } catch {
-    return true;
+  } catch (e) {
+    return message.test(String(e));
   }
 };
 
@@ -56,9 +61,36 @@ for (const toLang of kissTargets) {
 }
 check(wrongly.length === 0, `reject exactly the ${unsupported.length} unsupported KISS targets`, wrongly.length ? `wrong: ${wrongly.join(", ")}` : "");
 check(
-  await rejects(() => resHook({ res: { choices: [{ finish_reason: "length", message: { content: "途中まで" } }] } })),
+  await rejects(() => resHook({ res: { choices: [{ finish_reason: "length", message: { content: "途中まで" } }] } }), /cut off/),
   "reject a translation cut off at the token limit",
 );
+
+const reply = (content: string) => ({ res: { choices: [{ finish_reason: "stop", message: { content } }] } });
+const trimmed = await resHook(reply("  訳文\n"));
+check(JSON.stringify(trimmed.translations) === JSON.stringify([["訳文"]]), "return a finished translation", JSON.stringify(trimmed));
+
+const tagged = "PLaMo uses <|plamo:tag|> in its prompt format.";
+const escaped = (await reqHook({ url, texts: [tagged], fromLang: "auto", toLang: "ja" })).body.messages[0].content;
+const restored = (await resHook(reply(escaped))).translations[0][0];
+check(!escaped.includes("<|plamo:") && restored === tagged, "escape <|plamo: in the request and restore it in the response", `sent ${escaped}\n     got ${restored}`);
+
+const buildImport = async (args: string[], output: string): Promise<Setting> => {
+  const run = Bun.spawnSync([process.execPath, join(import.meta.dir, "build-import.ts"), ...args, output]);
+  if (!run.success) throw new Error(`build-import ${args.join(" ")} failed: ${run.stderr}`);
+  return Bun.file(output).json();
+};
+const reqSource = (await source("request-hook.js")).trim();
+const resSource = (await source("response-hook.js")).trim();
+const hasOnePlamoApi = (setting: Setting) => {
+  const apis = setting.transApis.filter((api) => api.apiSlug === "Custom_plamo-3-translate");
+  return apis.length === 1 && apis.every((api) => api.reqHook === reqSource && api.resHook === resSource);
+};
+const dir = await mkdtemp(join(tmpdir(), "kiss-import-"));
+const added = await buildImport(["--fresh"], join(dir, "added.json"));
+const updated = await buildImport([join(dir, "added.json")], join(dir, "updated.json"));
+await rm(dir, { recursive: true });
+check(hasOnePlamoApi(added), "import file carries the PLaMo API with the current hooks");
+check(hasOnePlamoApi(updated) && updated.transApis.length === added.transApis.length, "importing again updates the PLaMo API instead of adding another");
 
 const hasKana = (s: string) => /[぀-ヿ]/.test(s);
 const hasHan = (s: string) => /[一-鿿]/.test(s);
@@ -93,10 +125,9 @@ for (const c of cases) {
   const label = `${c.fromLang}->${c.toLang}`;
   const req = await reqHook({ url, texts: [c.text], fromLang: c.fromLang, toLang: c.toLang });
   const sent = JSON.stringify(req.body.chat_template_kwargs);
-  if (sent !== JSON.stringify(c.kwargs)) {
-    check(false, `${label} kwargs`, `sent ${sent}, want ${JSON.stringify(c.kwargs)}`);
-    continue;
-  }
+  const kwargsOk = sent === JSON.stringify(c.kwargs);
+  check(kwargsOk, `${label} kwargs`, kwargsOk ? "" : `sent ${sent}, want ${JSON.stringify(c.kwargs)}`);
+  if (!kwargsOk || offline) continue;
   const res = await fetch(req.url, {
     method: req.method,
     headers: { ...req.headers, Origin: "chrome-extension://kiss-translator" },
