@@ -1,23 +1,38 @@
 // KISS Translator と同じ方法（Sval サンドボックスで `exports.reqHook = <source>`）でフックを読み込み、
 // フック単体の振る舞いと、起動中の llama-server との往復を確かめる。
-import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import Sval from "sval";
 
-const url = process.env.URL || "http://127.0.0.1:8000/v1/chat/completions";
-const load = (name, file) => {
-  const interp = new Sval({ ecmaVer: "latest", sourceType: "script", sandBox: true });
-  interp.run(`exports.${name} = ${readFileSync(new URL(file, import.meta.url), "utf8")}`);
-  return interp.exports[name];
+type ReqHook = (args: { url: string; texts: string[]; fromLang: string; toLang: string }) => Promise<{
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: { chat_template_kwargs: unknown };
+}>;
+type ResHook = (args: { res: unknown }) => Promise<{ translations: string[][] }>;
+type Case = {
+  fromLang: string;
+  toLang: string;
+  text: string;
+  kwargs: Record<string, string>;
+  lang: (translation: string) => boolean;
 };
-const reqHook = load("reqHook", "./request-hook.js");
-const resHook = load("resHook", "./response-hook.js");
+
+const url = process.env.URL || "http://127.0.0.1:8000/v1/chat/completions";
+const load = async <T>(name: string, file: string): Promise<T> => {
+  const interp = new Sval({ ecmaVer: "latest", sourceType: "script", sandBox: true });
+  interp.run(`exports.${name} = ${await Bun.file(join(import.meta.dir, file)).text()}`);
+  return interp.exports[name] as T;
+};
+const reqHook = await load<ReqHook>("reqHook", "request-hook.js");
+const resHook = await load<ResHook>("resHook", "response-hook.js");
 
 let failed = 0;
-const check = (ok, label, detail = "") => {
+const check = (ok: boolean, label: string, detail = "") => {
   if (!ok) failed++;
   console.log(`${ok ? "OK  " : "FAIL"} ${label}${detail ? `\n     ${detail}` : ""}`);
 };
-const rejects = async (fn) => {
+const rejects = async (fn: () => Promise<unknown>) => {
   try {
     await fn();
     return false;
@@ -45,9 +60,9 @@ check(
   "reject a translation cut off at the token limit",
 );
 
-const hasKana = (s) => /[぀-ヿ]/.test(s);
-const hasHan = (s) => /[一-鿿]/.test(s);
-const cases = [
+const hasKana = (s: string) => /[぀-ヿ]/.test(s);
+const hasHan = (s: string) => /[一-鿿]/.test(s);
+const cases: Case[] = [
   {
     fromLang: "auto", toLang: "ja", text: "Local translation keeps your data on your own machine.",
     kwargs: { target_lang: "ja" }, lang: (s) => hasKana(s),
@@ -92,7 +107,7 @@ for (const c of cases) {
     check(false, `${label} ${sent}`, `HTTP ${res.status} ${JSON.stringify(json).slice(0, 200)}`);
     continue;
   }
-  const out = (await resHook({ res: json })).translations[0][0];
+  const out = (await resHook({ res: json })).translations[0]?.[0] ?? "";
   check(c.lang(out), `${label} ${sent}`, `${c.text}\n  => ${out}`);
 }
 process.exit(failed ? 1 : 0);
