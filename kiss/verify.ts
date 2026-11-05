@@ -1,5 +1,8 @@
 // KISS Translator と同じ方法（Sval サンドボックスで `exports.reqHook = <source>`）でフックを読み込み、
 // フック単体の振る舞いと、起動中の llama-server との往復を確かめる。
+// 使い方:
+//   bun run verify                サーバーを起動した状態で、フックと往復を確かめる
+//   bun run verify --hooks-only   サーバーなしで、フック単体だけを確かめる
 import { join } from "node:path";
 import Sval from "sval";
 
@@ -18,6 +21,7 @@ type Case = {
   lang: (translation: string) => boolean;
 };
 
+const hooksOnly = process.argv.slice(2).includes("--hooks-only");
 const url = process.env.URL || "http://127.0.0.1:8000/v1/chat/completions";
 const load = async <T>(name: string, file: string): Promise<T> => {
   const interp = new Sval({ ecmaVer: "latest", sourceType: "script", sandBox: true });
@@ -93,8 +97,9 @@ for (const c of cases) {
   const label = `${c.fromLang}->${c.toLang}`;
   const req = await reqHook({ url, texts: [c.text], fromLang: c.fromLang, toLang: c.toLang });
   const sent = JSON.stringify(req.body.chat_template_kwargs);
-  if (sent !== JSON.stringify(c.kwargs)) {
-    check(false, `${label} kwargs`, `sent ${sent}, want ${JSON.stringify(c.kwargs)}`);
+  const kwargsOk = sent === JSON.stringify(c.kwargs);
+  if (!kwargsOk || hooksOnly) {
+    check(kwargsOk, `${label} kwargs`, kwargsOk ? "" : `sent ${sent}, want ${JSON.stringify(c.kwargs)}`);
     continue;
   }
   const res = await fetch(req.url, {
