@@ -1,0 +1,11 @@
+{
+  "name": "plamo-browser-translate",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "verify": "node kiss/verify.mjs"
+  },
+  "devDependencies": {
+    "sval": "^0.5.2"
+  }
+}
