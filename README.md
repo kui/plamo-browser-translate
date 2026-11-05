@@ -20,7 +20,7 @@ PLaMo 3 Translate は翻訳先の言語を指示文ではなく `chat_template_k
 bun run serve
 ```
 
-初回はモデル（2B の Q4_K_M、約 1.8 GB）を `models/` に取得してから、`http://127.0.0.1:8000` で待ち受ける。モデルのサイズは引数で選べる。
+初回はモデル（2B の Q4_K_M、約 1.8 GB）を取得してから、`http://127.0.0.1:8000` で待ち受ける。モデルはホームの `.cache/plamo-browser-translate/models` に保存し、同じ PC の git worktree で共有する。モデルのサイズは引数で選べる。
 
 ```bash
 bun run serve 8b
@@ -31,6 +31,7 @@ bun run serve 8b
 | 第 1 引数 | `2b` | `0.8b`、`2b`、`8b`、`31b` |
 | `QUANT` | `Q4_K_M` | GGUF の量子化。リポジトリにあるものを指定する |
 | `PORT` | `8000` | 待ち受けポート。変えたら、`bun run kiss-import` と `bun run verify` にも環境変数 `URL` で同じポートの URL を渡す |
+| `MODELS_DIR` | ホームの `.cache/plamo-browser-translate/models` | モデルの保存先 |
 
 環境変数は、Mac では `PORT=8001 bun run serve`、Windows の PowerShell では `$env:PORT = 8001; bun run serve` のように渡す。
 
@@ -102,4 +103,4 @@ bun run verify --offline
 - 段落ごとに 1 リクエストを送るので、長いページは訳し終わるまで時間がかかる。速さが要るなら `0.8b` か `2b`、質が要るなら `8b` を使う。
 - 対応言語は 53 言語（一覧は [`kiss/request-hook.js`](kiss/request-hook.js)）。KISS Translator で選べる次の 11 言語は対応していないので、翻訳先に選ぶとエラーになる。チェコ語 `cs`、デンマーク語 `da`、ギリシャ語 `el`、フィンランド語 `fi`、マルタ語 `mt`、ノルウェー語 `nb`、ポルトガル語 `pt`、ルーマニア語 `ro`、スウェーデン語 `sv`、トルコ語 `tr`、ウクライナ語 `uk`。原文の言語にこれらを選んだ場合は、言語を指定せずモデルに判定させる。
 - 1 リクエストで扱えるのは、原文と訳を合わせて 16384 トークン（`-c 65536` を 4 スロットで割った値）まで、訳だけなら 8192 トークン（フックの `max_tokens`）まで。超えた段落はエラーになる。合計の上限は `serve.ts` の `-c` で増やせる。
-- モデルは PLaMo コミュニティライセンスに従う。非商用なら無償。商用利用の条件は `models/*/LICENSE/ja` を参照する。
+- モデルは PLaMo コミュニティライセンスに従う。非商用なら無償。商用利用の条件は、モデルの保存先の `*/LICENSE/ja` を参照する。

@@ -1,12 +1,15 @@
 // PLaMo 3 Translate を OpenAI 互換 API として起動する。
 // 使い方: bun run serve [2b|8b|0.8b|31b]   (既定 2b、ポート 8000)
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 const size = process.argv[2] || "2b";
 const quant = process.env.QUANT || "Q4_K_M";
 const port = process.env.PORT || "8000";
 const repo = `pfnet/plamo-3-translate-${size}-GGUF`;
-const dir = join(import.meta.dir, "models", `plamo-3-translate-${size}-GGUF`);
+// リポジトリの中に置くと、git worktree ごとに同じモデルを取得し直し、作業後も大きなファイルが残る。
+const modelsDir = process.env.MODELS_DIR || join(homedir(), ".cache", "plamo-browser-translate", "models");
+const dir = join(modelsDir, `plamo-3-translate-${size}-GGUF`);
 const ggufName = `plamo-3-translate-${size}-${quant}.gguf`;
 const gguf = join(dir, ggufName);
 const template = join(dir, "chat_template.jinja");
