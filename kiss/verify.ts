@@ -9,7 +9,7 @@ type ReqHook = (args: { url: string; texts: string[]; fromLang: string; toLang: 
   headers: Record<string, string>;
   body: { chat_template_kwargs: unknown };
 }>;
-type ResHook = (args: { res: unknown }) => Promise<{ translations: string[][] }>;
+type ResHook = (args: { res: unknown }) => Promise<{ translations: [[string]] }>;
 type Case = {
   fromLang: string;
   toLang: string;
@@ -107,7 +107,7 @@ for (const c of cases) {
     check(false, `${label} ${sent}`, `HTTP ${res.status} ${JSON.stringify(json).slice(0, 200)}`);
     continue;
   }
-  const out = (await resHook({ res: json })).translations[0]?.[0] ?? "";
+  const out = (await resHook({ res: json })).translations[0][0];
   check(c.lang(out), `${label} ${sent}`, `${c.text}\n  => ${out}`);
 }
 process.exit(failed ? 1 : 0);
