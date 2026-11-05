@@ -1,10 +1,10 @@
 // PLaMo 3 Translate を OpenAI 互換 API として起動する。
-// 使い方: bun run serve [2b|8b|0.8b|31b]   (既定 2b、ポート 8000)
+// 使い方: bun run serve [2b|8b|0.8b|31b]   (既定 2b、ポート 21434)
 import { join } from "node:path";
 
 const size = process.argv[2] || "2b";
 const quant = process.env.QUANT || "Q4_K_M";
-const port = process.env.PORT || "8000";
+const port = process.env.PORT || "21434";
 const sleepIdleSeconds = process.env.SLEEP_IDLE_SECONDS || "300";
 const repo = `pfnet/plamo-3-translate-${size}-GGUF`;
 const dir = join(import.meta.dir, "models", `plamo-3-translate-${size}-GGUF`);

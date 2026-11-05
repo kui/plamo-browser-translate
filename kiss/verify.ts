@@ -22,7 +22,7 @@ type Case = {
 };
 
 const offline = process.argv.slice(2).includes("--offline");
-const url = process.env.URL || "http://127.0.0.1:8000/v1/chat/completions";
+const url = process.env.URL || "http://127.0.0.1:21434/v1/chat/completions";
 const source = (file: string) => Bun.file(join(import.meta.dir, file)).text();
 const load = async <T>(name: string, file: string): Promise<T> => {
   const interp = new Sval({ ecmaVer: "latest", sourceType: "script", sandBox: true });

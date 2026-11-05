@@ -20,7 +20,7 @@ PLaMo 3 Translate は翻訳先の言語を指示文ではなく `chat_template_k
 bun run serve
 ```
 
-初回はモデル（2B の Q4_K_M、約 1.8 GB）を `models/` に取得してから、`http://127.0.0.1:8000` で待ち受ける。モデルのサイズは引数で選べる。
+初回はモデル（2B の Q4_K_M、約 1.8 GB）を `models/` に取得してから、`http://127.0.0.1:21434` で待ち受ける。モデルのサイズは引数で選べる。
 
 ```bash
 bun run serve 8b
@@ -30,7 +30,7 @@ bun run serve 8b
 |---|---|---|
 | 第 1 引数 | `2b` | `0.8b`、`2b`、`8b`、`31b` |
 | `QUANT` | `Q4_K_M` | GGUF の量子化。リポジトリにあるものを指定する |
-| `PORT` | `8000` | 待ち受けポート。変えたら、`bun run kiss-import` と `bun run verify` にも環境変数 `URL` で同じポートの URL を渡す |
+| `PORT` | `21434` | 待ち受けポート。変えたら、`bun run kiss-import` と `bun run verify` にも環境変数 `URL` で同じポートの URL を渡す |
 | `SLEEP_IDLE_SECONDS` | `300` | この秒数だけ使われないと、モデルをメモリから外す。`-1` で無効 |
 
 環境変数は、Mac では `PORT=8001 bun run serve`、Windows の PowerShell では `$env:PORT = 8001; bun run serve` のように渡す。
@@ -93,7 +93,7 @@ Chrome ウェブストアか [Releases](https://github.com/fishjar/kiss-translat
 インポートで入るのと同じ値を、画面で設定する。
 
 1. 拡張の設定画面で **翻訳サービス** を開き、**追加** → **Custom** で API を追加する。
-2. URL に `http://127.0.0.1:8000/v1/chat/completions` を入れる。
+2. URL に `http://127.0.0.1:21434/v1/chat/completions` を入れる。
 3. **Request Hook** に [`kiss/request-hook.js`](kiss/request-hook.js) の中身を貼る。
 4. **Response Hook** に [`kiss/response-hook.js`](kiss/response-hook.js) の中身を貼る。
 5. **翻訳プロンプト** で **[单句] 単文翻訳 (Concise)** など単文翻訳のプロンプトを選ぶ。一括翻訳のプロンプトを選ぶと複数段落が 1 リクエストに入り、先頭の段落しか訳されない。
