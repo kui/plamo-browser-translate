@@ -1,13 +1,22 @@
-// KISS Translator からエクスポートした設定に PLaMo 3 Translate の API を足し込み、インポート用の設定を書き出す。
-// 使い方: node kiss/build-import.mjs <エクスポートした設定.json> [出力先.json]
+// PLaMo 3 Translate の API を入れた、KISS Translator のインポート用設定を書き出す。
+// 使い方:
+//   node kiss/build-import.mjs <エクスポートした設定.json> [出力先.json]   今の設定に足し込む
+//   node kiss/build-import.mjs --fresh [出力先.json]                      API の一覧を初期状態 + PLaMo にする
 //
-// KISS のインポートは設定のトップレベルを丸ごと置き換え、transApis も配列ごと差し替わる。
-// PLaMo の API だけを書いたファイルを読み込むと既存の API が消えるので、必ず今の設定を土台にする。
+// KISS のインポートは設定のトップレベルをキーごとに置き換え、transApis も配列ごと差し替わる。
+// 今の API を残すには、エクスポートした設定を土台にする。--fresh は KISS v2.1.1 の新規インストール時の
+// API 一覧を土台にし、transApis と version だけを書き出す。読み込むと、自分で足した API と組み込み API への
+// 変更は消えるが、ほかの設定はそのまま残る。
 import { readFileSync, writeFileSync } from "node:fs";
 
-const [input, output = "kiss-setting-plamo.json"] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const fresh = args[0] === "--fresh";
+const [input, output = "kiss-setting-plamo.json"] = fresh
+  ? [new URL("./kiss-v2.1.1-default-apis.json", import.meta.url), args[1]]
+  : args;
 if (!input) {
   console.error("usage: node kiss/build-import.mjs <exported-setting.json> [output.json]");
+  console.error("       node kiss/build-import.mjs --fresh [output.json]");
   process.exit(2);
 }
 

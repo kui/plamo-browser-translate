@@ -47,7 +47,14 @@ Chrome ウェブストアか [Releases](https://github.com/fishjar/kiss-translat
 
 ### 設定ファイルをインポートする
 
-KISS Translator のインポートは、設定全体をファイルの中身で置き換える。PLaMo の API だけを書いたファイルを読み込むと、今ある API がすべて消える。そこで、今の設定をエクスポートし、[`kiss/build-import.mjs`](kiss/build-import.mjs) で PLaMo の API を足したファイルを作って読み込む。
+KISS Translator のインポートは、ファイルにあるキーの値で、設定の同じキーを置き換える。API の一覧 `transApis` は配列ごと置き換わるので、PLaMo の API だけを書いたファイルを読み込むと、今ある API がすべて消える。[`kiss/build-import.mjs`](kiss/build-import.mjs) は、土台にした API の一覧に PLaMo の API を足したファイルを作る。土台は次の 2 つから選ぶ。
+
+- 今の API を残すなら、エクスポートした今の設定を土台にする。
+- API の一覧を初期状態に戻してよいなら、エクスポートせずに `--fresh` で作る。
+
+インポートで入る値は、どちらも同じ。URL、2 つのフック、単文翻訳のプロンプト、最大同時リクエスト数 `4`、リクエストタイムアウト `300` 秒が入る。2B で長い段落を訳すと 100 秒ほどかかることがあり、既定の 120 秒では足りない場合がある。
+
+#### 今の API を残す
 
 1. 拡張の設定画面で **概要** を開き、**エクスポート** を押す。`kiss-setting_v2_<数字>.json` が保存される。
 2. インポート用のファイルを作る。
@@ -63,7 +70,20 @@ KISS Translator のインポートは、設定全体をファイルの中身で�
 
 エクスポートしてからインポートするまでの間に変えた設定は、インポートで元に戻る。エクスポートしたファイルと `kiss-setting-plamo.json` には、ほかの API のキーも入っている。どちらもリポジトリに入れない（`kiss-setting-plamo.json` は `.gitignore` 済み）。
 
-インポートで入る値は、URL、2 つのフック、単文翻訳のプロンプト、最大同時リクエスト数 `4`、タイムアウト `300` 秒。2B で長い段落を訳すと 100 秒ほどかかることがあり、既定の 120 秒では足りない場合がある。
+#### API の一覧を初期状態に戻す
+
+1. インポート用のファイルを作る。
+
+	```bash
+	npm run kiss-import -- --fresh
+	```
+
+	`kiss-setting-plamo.json` ができる。中身は `version` と `transApis` だけで、API の一覧は KISS Translator v2.1.1 を新しく入れたときの 33 個（[`kiss/kiss-v2.1.1-default-apis.json`](kiss/kiss-v2.1.1-default-apis.json)）に PLaMo を足した 34 個になる。
+2. **概要** の **インポート** で `kiss-setting-plamo.json` を選ぶ。
+3. **翻訳サービス** の **PLaMo 3 Translate** で **クリックしてテスト** を押し、「テスト成功」と出ることを確かめる。
+4. **ウェブ翻訳** で、**翻訳サービス** に **PLaMo 3 Translate** を選び、**翻訳先の言語** を日本語にする。
+
+インポートすると、自分で足した API と、組み込みの API に入れたキーや変更は消える。一般設定やウェブ翻訳のルールなど、API の一覧以外の設定は残る。
 
 ### 画面で手入力する
 
