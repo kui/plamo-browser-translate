@@ -5,6 +5,7 @@ import { join } from "node:path";
 const size = process.argv[2] || "2b";
 const quant = process.env.QUANT || "Q4_K_M";
 const port = process.env.PORT || "8000";
+const sleepIdleSeconds = process.env.SLEEP_IDLE_SECONDS || "300";
 const repo = `pfnet/plamo-3-translate-${size}-GGUF`;
 const dir = join(import.meta.dir, "models", `plamo-3-translate-${size}-GGUF`);
 const ggufName = `plamo-3-translate-${size}-${quant}.gguf`;
@@ -42,6 +43,7 @@ process.exit(run("llama-server", [
   "--alias", "plamo-3-translate",
   "-c", "65536",
   "--parallel", "4",
+  "--sleep-idle-seconds", sleepIdleSeconds,
   "--host", "127.0.0.1",
   "--port", port,
 ]));

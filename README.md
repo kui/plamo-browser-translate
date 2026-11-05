@@ -31,8 +31,11 @@ bun run serve 8b
 | 第 1 引数 | `2b` | `0.8b`、`2b`、`8b`、`31b` |
 | `QUANT` | `Q4_K_M` | GGUF の量子化。リポジトリにあるものを指定する |
 | `PORT` | `8000` | 待ち受けポート。変えたら、`bun run kiss-import` と `bun run verify` にも環境変数 `URL` で同じポートの URL を渡す |
+| `SLEEP_IDLE_SECONDS` | `300` | この秒数だけ使われないと、モデルをメモリから外す。`-1` で無効 |
 
 環境変数は、Mac では `PORT=8001 bun run serve`、Windows の PowerShell では `$env:PORT = 8001; bun run serve` のように渡す。
+
+使われない間はモデルがメモリから外れるので、サーバーを止めなくてもゲームなどにメモリを空けられる。プロセスは待ち受けを続け、次の翻訳リクエストでモデルを読み込み直す。2B のモデルなら、その 1 回だけ数秒余分にかかる。
 
 ## KISS Translator に API を足す
 
