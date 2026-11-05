@@ -41,16 +41,40 @@ PLaMo が対応していない翻訳先や、上限で途中まで止まった�
 
 `serve.sh` は GGUF に同梱の `chat_template.jinja` を `--chat-template-file` で必ず読み込む。GGUF に埋め込まれたテンプレートは古く、翻訳履歴を扱えない。
 
-## KISS Translator を設定する
+## KISS Translator に API を足す
 
-1. Chrome ウェブストアか [Releases](https://github.com/fishjar/kiss-translator/releases) から KISS Translator を入れる。
-2. 拡張の設定画面で **サービス設定** を開く。**追加** → **ネットワークAPI** → **Custom** の順に選び、API を追加する。
-3. URL に `http://127.0.0.1:8000/v1/chat/completions` を入れる。
-4. **Request Hook** に [`kiss/request-hook.js`](kiss/request-hook.js) の中身を貼る。
-5. **Response Hook** に [`kiss/response-hook.js`](kiss/response-hook.js) の中身を貼る。
-6. **翻訳プロンプト** で **[单句] 単文翻訳 (Concise)** など単文翻訳のプロンプトを選ぶ。Custom API では、ここで単文と一括のどちらを選ぶかで、段落をまとめて送るかどうかが決まる。一括翻訳のプロンプトを選ぶと複数段落が 1 リクエストに入り、フックは先頭の段落しか訳さない。プロンプトの本文はフックが使わないので、単文翻訳ならどれでもよい。
-7. **もっと見る** を押し、表示された **最大同時リクエスト数** を `4` にする。`serve.sh` の `--parallel 4` と揃える。
-8. 翻訳サービスにこの API を選び、**翻訳先の言語** を日本語にしてページを翻訳する。
+Chrome ウェブストアか [Releases](https://github.com/fishjar/kiss-translator/releases) から KISS Translator を入れる。そのあと、設定ファイルをインポートするか、画面で手入力する。画面の名前は KISS Translator v2.1.1 の日本語表示に合わせている。
+
+### 設定ファイルをインポートする
+
+KISS Translator のインポートは、設定全体をファイルの中身で置き換える。PLaMo の API だけを書いたファイルを読み込むと、今ある API がすべて消える。そこで、今の設定をエクスポートし、[`kiss/build-import.mjs`](kiss/build-import.mjs) で PLaMo の API を足したファイルを作って読み込む。
+
+1. 拡張の設定画面で **概要** を開き、**エクスポート** を押す。`kiss-setting_v2_<数字>.json` が保存される。
+2. インポート用のファイルを作る。
+
+	```bash
+	npm run kiss-import -- ~/Downloads/kiss-setting_v2_<数字>.json
+	```
+
+	`kiss-setting-plamo.json` ができる。もう一度実行すると、同じ API を作り直さずに上書きする。`127.0.0.1` か `localhost` の `/v1/chat/completions` を指す Custom API があれば、それを更新する。
+3. **概要** の **インポート** で `kiss-setting-plamo.json` を選ぶ。
+4. **翻訳サービス** の一覧に **PLaMo 3 Translate** が増えたことを確かめ、**クリックしてテスト** を押す。「テスト成功」と訳文が出れば使える。
+5. **ウェブ翻訳** で、**翻訳サービス** に **PLaMo 3 Translate** を選び、**翻訳先の言語** を日本語にする。
+
+エクスポートしてからインポートするまでの間に変えた設定は、インポートで元に戻る。エクスポートしたファイルと `kiss-setting-plamo.json` には、ほかの API のキーも入っている。どちらもリポジトリに入れない（`kiss-setting-plamo.json` は `.gitignore` 済み）。
+
+インポートで入る値は、URL、2 つのフック、単文翻訳のプロンプト、最大同時リクエスト数 `4`、タイムアウト `300` 秒。2B で長い段落を訳すと 100 秒ほどかかることがあり、既定の 120 秒では足りない場合がある。
+
+### 画面で手入力する
+
+1. 拡張の設定画面で **翻訳サービス** を開き、**追加** → **Custom** で API を追加する。
+2. URL に `http://127.0.0.1:8000/v1/chat/completions` を入れる。
+3. **Request Hook** に [`kiss/request-hook.js`](kiss/request-hook.js) の中身を貼る。
+4. **Response Hook** に [`kiss/response-hook.js`](kiss/response-hook.js) の中身を貼る。
+5. **翻訳プロンプト** で **[单句] 単文翻訳 (Concise)** など単文翻訳のプロンプトを選ぶ。Custom API では、ここで単文と一括のどちらを選ぶかで、段落をまとめて送るかどうかが決まる。一括翻訳のプロンプトを選ぶと複数段落が 1 リクエストに入り、フックは先頭の段落しか訳さない。プロンプトの本文はフックが使わないので、単文翻訳ならどれでもよい。
+6. **もっと見る** を押し、表示された **最大同時リクエスト数** を `4`、**リクエストタイムアウト** を `300` 秒にする。同時リクエスト数は `serve.sh` の `--parallel 4` と揃える。
+7. **保存** を押し、**クリックしてテスト** で「テスト成功」と出ることを確かめる。
+8. **ウェブ翻訳** で、**翻訳サービス** にこの API を選び、**翻訳先の言語** を日本語にする。
 
 `llama-server` は拡張からのリクエストに CORS ヘッダーを返すので、サーバー側の追加設定は要らない。
 

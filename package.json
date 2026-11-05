@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "verify": "node kiss/verify.mjs"
+    "verify": "node kiss/verify.mjs",
+    "kiss-import": "node kiss/build-import.mjs"
   },
   "devDependencies": {
     "sval": "^0.5.2"
