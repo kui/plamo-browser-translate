@@ -11,8 +11,8 @@ PLaMo 3 Translate は翻訳先の言語を指示文ではなく `chat_template_k
 ## 必要なもの
 
 - Apple Silicon の Mac か Windows（他の OS でも llama.cpp が動けば同じ手順で使える）
-- llama.cpp（Mac は `brew install llama.cpp`、Windows は `winget install ggml.llamacpp`）
-- [mise](https://mise.jdx.dev/)（`mise install` で bun と、モデルの取得に使う uv が入る）
+- llama.cpp（Mac は `brew install llama.cpp`、Windows は `winget install ggml.llamacpp` のあと新しいターミナルを開く）
+- [mise](https://mise.jdx.dev/)（[有効化](https://mise.jdx.dev/getting-started.html#activate-mise)してから `mise install` を実行すると、bun と、モデルの取得に使う uv が入る）
 
 ## サーバーを起動する
 
@@ -47,7 +47,7 @@ Chrome ウェブストアか [Releases](https://github.com/fishjar/kiss-translat
      bun run kiss-import ~/Downloads/kiss-setting_v2_<数字>.json
      ```
 
-     Windows PowerShell 5.1 では `~` が展開されないので、`$HOME\Downloads\...` と書く。
+     Windows の PowerShell では `$HOME\Downloads\...` と書く。
 
    - API の一覧を v2.1.1 の初期状態に戻してよい: エクスポートせずに作る。
 

@@ -11,15 +11,21 @@ const ggufName = `plamo-3-translate-${size}-${quant}.gguf`;
 const gguf = join(dir, ggufName);
 const template = join(dir, "chat_template.jinja");
 
-function run(command: string, args: string[]): number {
+function requireCommand(command: string) {
   if (!Bun.which(command)) {
-    console.error(`${command} が見つからない。README の「必要なもの」を確認する。`);
+    console.error(`${command} is not on PATH. See the requirements in README.md.`);
     process.exit(1);
   }
+}
+
+function run(command: string, args: string[]): number {
   return Bun.spawnSync([command, ...args], { stdio: ["inherit", "inherit", "inherit"] }).exitCode;
 }
 
+requireCommand("llama-server");
+
 if (!(await Bun.file(gguf).exists()) || !(await Bun.file(template).exists())) {
+  requireCommand("uvx");
   const status = run("uvx", [
     "--from", "huggingface_hub", "hf", "download", repo, ggufName,
     "chat_template.jinja", "LICENSE/ja", "LICENSE/en", "--local-dir", dir,
