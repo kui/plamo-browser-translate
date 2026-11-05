@@ -37,6 +37,26 @@ bun run serve 8b
 
 使われない間はモデルがメモリから外れるので、サーバーを止めなくてもゲームなどにメモリを空けられる。プロセスは待ち受けを続け、次の翻訳リクエストでモデルを読み込み直す。2B のモデルなら、その 1 回だけ数秒余分にかかる。
 
+## ログオン時に自動で起動する（Windows）
+
+タスクスケジューラに登録すると、ログオンのたびにウィンドウを出さずに起動する。登録するとすぐに起動もする。
+
+```bash
+bun run autostart install
+```
+
+モデルのサイズは `bun run autostart install 8b` のように選べる。そのとき設定されている `QUANT`、`PORT`、`SLEEP_IDLE_SECONDS` も引き継ぐ。変えるときは `install` をやり直す。
+
+| コマンド | 動作 |
+|---|---|
+| `bun run autostart stop` | サーバーを今すぐ止める。次のログオンでまた起動する |
+| `bun run autostart start` | 止めたサーバーを起動する |
+| `bun run autostart uninstall` | サーバーを止めて、登録を消す |
+
+- サーバーの出力は `serve.log` に書かれる。起動しないときはここを見る。初回はモデルを取得するので、待ち受けるまで時間がかかる。
+- タスクは `bun` と `llama-server` を、ユーザー環境変数の `PATH` から探す。mise は [shims を `PATH` に入れる](https://mise.jdx.dev/dev-tools/shims.html)。シェルのプロファイルで有効化するだけだと、タスクから `bun` が見つからない。
+- 登録したフォルダーのファイルを使うので、リポジトリを動かしたら `install` をやり直す。
+
 ## KISS Translator に API を足す
 
 Chrome ウェブストアか [Releases](https://github.com/fishjar/kiss-translator/releases) から KISS Translator を入れ、設定ファイルのインポートか手入力で API を足す。画面の名前は KISS Translator v2.1.1 の日本語表示に合わせている。
