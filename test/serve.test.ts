@@ -13,6 +13,7 @@ let binDir: string;
 let home: string;
 let port: string;
 let foreign: ReturnType<typeof Bun.serve> | undefined;
+let hub: ReturnType<typeof Bun.serve>;
 
 function makeCheckout(name: string): string {
   const dir = join(root, name);
@@ -34,7 +35,7 @@ function environment(extra: Record<string, string>): Record<string, string> {
     if (value !== undefined && key.toUpperCase() !== "PATH") env[key] = value;
   }
   const inherited = process.env.PATH ?? process.env.Path ?? "";
-  return { ...env, PATH: binDir + delimiter + inherited, HOME: home, USERPROFILE: home, PORT: port, ...extra };
+  return { ...env, PATH: binDir + delimiter + inherited, HOME: home, USERPROFILE: home, PORT: port, HF_ENDPOINT: hub.url.origin, ...extra };
 }
 
 async function serve(dir: string, args: string[], extra: Record<string, string> = {}) {
@@ -70,10 +71,17 @@ beforeAll(async () => {
     "--outfile", join(binDir, `llama-server${exe}`),
   ], { stderr: "inherit" });
   expect(build.exitCode).toBe(0);
-  copyFileSync(join(binDir, `llama-server${exe}`), join(binDir, `uvx${exe}`));
+  hub = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: (request) => new URL(request.url).pathname.includes("-2b-")
+      ? new Response(`template from ${new URL(request.url).pathname}`)
+      : new Response(null, { status: 404 }),
+  });
 });
 
 afterAll(() => {
+  void hub.stop(true);
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -280,21 +288,31 @@ test("a server that stops right after answering is not reported as started", asy
   expect(existsSync(stateFile())).toBe(false);
 });
 
-test("the port is checked after the model download", async () => {
+test("a server that appears during the download is not mistaken for this one", async () => {
   const dir = makeCheckout("a");
   rmSync(modelsDir(), { recursive: true });
   const starting = serve(dir, ["start"], { FAKE_DOWNLOAD_MS: "3000" });
-  await Bun.sleep(1000);
+  while (!existsSync(stateFile())) await Bun.sleep(50);
   foreign = Bun.serve({ hostname: "127.0.0.1", port: Number(port), fetch: () => new Response() });
   const started = await starting;
   expect(started.code).toBe(1);
-  expect(started.output).toContain("Another server");
+  expect(started.output).toContain("exited during startup");
+  expect(existsSync(stateFile())).toBe(false);
+});
+
+test("stop works during the download", async () => {
+  const dir = makeCheckout("a");
+  rmSync(modelsDir(), { recursive: true });
+  const starting = serve(dir, ["start"], { FAKE_DOWNLOAD_MS: "60000" });
+  while (!existsSync(stateFile())) await Bun.sleep(50);
+  expect((await serve(dir, ["stop"])).output).toContain("Stopped");
+  expect((await starting).code).toBe(1);
   expect(existsSync(stateFile())).toBe(false);
 });
 
 test("checkouts share the model in the home directory", async () => {
   const dir = makeCheckout("a");
-  const started = await serve(dir, ["start"], { FAKE_DOWNLOAD_CODE: "3" });
+  const started = await serve(dir, ["start"], { FAKE_DOWNLOAD_FAIL: "1" });
   expect(started.output).toContain("Listening on");
   expect(started.code).toBe(0);
   expect(existsSync(join(dir, "models"))).toBe(false);
@@ -305,40 +323,48 @@ test("MODELS_DIR replaces the model location", async () => {
   const elsewhere = join(home, "日本語 パス");
   rmSync(modelsDir(), { recursive: true });
   writeModel(elsewhere);
-  const started = await serve(dir, ["start"], { FAKE_DOWNLOAD_CODE: "3", MODELS_DIR: elsewhere });
+  const started = await serve(dir, ["start"], { FAKE_DOWNLOAD_FAIL: "1", MODELS_DIR: elsewhere });
   expect(started.output).toContain("Listening on");
   expect(started.code).toBe(0);
   await serve(dir, ["stop"]);
 
-  const missing = await serve(dir, ["start"], { FAKE_DOWNLOAD_CODE: "3", MODELS_DIR: join(home, "empty") });
-  expect(missing.code).toBe(3);
+  const missing = await serve(dir, ["start"], { FAKE_DOWNLOAD_FAIL: "1", MODELS_DIR: join(home, "empty") });
+  expect(missing.code).toBe(1);
 });
 
-test("a successful download removes only its own interrupted files", async () => {
+test("a missing model and template are downloaded into the models directory", async () => {
   const dir = makeCheckout("a");
-  const downloads = join(modelsDir(), "plamo-3-translate-0.8b-GGUF", ".cache", "huggingface", "download");
-  mkdirSync(downloads, { recursive: true });
-  // 実際の hf が plamo-3-translate-0.8b-Q4_K_M.gguf の中断時に残した名前。
-  const own = join(downloads, "ZTqpEIrLb8A8hMNOyQa0DdQOCc4=.3dbb09295bfd.75d925c4.incomplete");
-  const otherQuant = join(downloads, "AAAAAAAAAAAAAAAAAAAAAAAAAAA=.3dbb09295bfd.75d925c4.incomplete");
-  writeFileSync(own, "");
-  writeFileSync(otherQuant, "");
+  const elsewhere = join(home, "日本語 パス");
+  const started = await serve(dir, ["start"], { MODELS_DIR: elsewhere, FAKE_DOWNLOAD_MS: "3000" });
+  expect(started.output).toContain("Waiting for the server to download");
+  expect(started.output).toContain("Listening on");
+  expect(started.code).toBe(0);
 
-  expect((await serve(dir, ["start", "0.8b"], { FAKE_DOWNLOAD_CODE: "3" })).code).toBe(3);
-  expect(existsSync(own)).toBe(true);
-
-  expect((await serve(dir, ["start", "0.8b"])).code).toBe(0);
-  expect(existsSync(own)).toBe(false);
-  expect(existsSync(otherQuant)).toBe(true);
+  const repo = "/pfnet/plamo-3-translate-2b-GGUF/resolve/main";
+  const model = join(elsewhere, "plamo-3-translate-2b-GGUF");
+  expect(readFileSync(join(model, "plamo-3-translate-2b-Q4_K_M.gguf"), "utf8")).toBe(`${hub.url.origin}${repo}/plamo-3-translate-2b-Q4_K_M.gguf`);
+  expect(readFileSync(join(model, "chat_template.jinja"), "utf8")).toBe(`template from ${repo}/chat_template.jinja`);
 });
 
-test("a failed model download does not start the server", async () => {
+test("a template that cannot be downloaded stops start", async () => {
+  const dir = makeCheckout("a");
+  const missing = await serve(dir, ["start", "8b"]);
+  expect(missing.code).toBe(1);
+  expect(missing.output).toContain("status 404");
+  expect(existsSync(stateFile())).toBe(false);
+
+  const offline = await serve(dir, ["start", "8b"], { HF_ENDPOINT: `http://127.0.0.1:${port}` });
+  expect(offline.code).toBe(1);
+  expect(offline.output).toContain("Could not download");
+});
+
+test("a failed model download is reported without leaving state", async () => {
   const dir = makeCheckout("a");
   rmSync(modelsDir(), { recursive: true });
-  const failed = await serve(dir, ["start"], { FAKE_DOWNLOAD_CODE: "3" });
-  expect(failed.code).toBe(3);
-  const killed = await serve(dir, ["start"], { FAKE_DOWNLOAD_SIGNAL: "1" });
-  expect(killed.code).not.toBe(0);
+  const failed = await serve(dir, ["start"], { FAKE_DOWNLOAD_FAIL: "1" });
+  expect(failed.code).toBe(1);
+  expect(failed.output).toContain(`See ${logFile()}`);
+  expect(existsSync(stateFile())).toBe(false);
   expect(await health()).toBeUndefined();
 });
 

@@ -12,7 +12,7 @@ PLaMo 3 Translate は翻訳先の言語を指示文ではなく `chat_template_k
 
 - Apple Silicon の Mac か Windows（他の OS でも llama.cpp が動けば同じ手順で使える）
 - llama.cpp（Mac は `brew install llama.cpp`、Windows は `winget install ggml.llamacpp` のあと新しいターミナルを開く）
-- [mise](https://mise.jdx.dev/)（[有効化](https://mise.jdx.dev/getting-started.html#activate-mise)してから `mise install` を実行すると、bun と、モデルの取得に使う uv が入る）
+- [mise](https://mise.jdx.dev/)（[有効化](https://mise.jdx.dev/getting-started.html#activate-mise)してから `mise install` を実行すると、bun が入る）
 
 ## サーバーを起動・停止する
 
@@ -20,7 +20,7 @@ PLaMo 3 Translate は翻訳先の言語を指示文ではなく `chat_template_k
 bun run serve start
 ```
 
-初回はモデル（2B の Q4_K_M、約 1.8 GB）をダウンロードする。モデルは `~/.cache/plamo-browser-translate/models` に保存され、同じマシンの git worktree 間で共有される。サーバーはバックグラウンドで動き、`http://127.0.0.1:21434` で応答するようになると、コマンドは終了する。ターミナルを閉じてもサーバーは止まらない。サーバーの出力は、ホームの `.cache/plamo-browser-translate/<ポート>.log` に書かれる。
+初回はモデル（2B の Q4_K_M、約 1.8 GB）をダウンロードする。進捗は表示されない。`bun run serve stop` で止めても、次の `start` で続きから再開する。モデルは `~/.cache/plamo-browser-translate/models` に保存され、同じマシンの git worktree 間で共有される。サーバーはバックグラウンドで動き、`http://127.0.0.1:21434` で応答するようになると、コマンドは終了する。ターミナルを閉じてもサーバーは止まらない。サーバーの出力は、ホームの `.cache/plamo-browser-translate/<ポート>.log` に書かれる。
 
 モデルのサイズは引数で選べる。
 
@@ -137,4 +137,4 @@ bun run verify --offline
 - 段落ごとに 1 リクエストを送るので、長いページは訳し終わるまで時間がかかる。速さが要るなら `0.8b` か `2b`、質が要るなら `8b` を使う。
 - 対応言語は 53 言語（一覧は [`kiss/request-hook.js`](kiss/request-hook.js)）。KISS Translator で選べる次の 11 言語は対応していないので、翻訳先に選ぶとエラーになる。チェコ語 `cs`、デンマーク語 `da`、ギリシャ語 `el`、フィンランド語 `fi`、マルタ語 `mt`、ノルウェー語 `nb`、ポルトガル語 `pt`、ルーマニア語 `ro`、スウェーデン語 `sv`、トルコ語 `tr`、ウクライナ語 `uk`。原文の言語にこれらを選んだ場合は、言語を指定せずモデルに判定させる。
 - 1 リクエストで扱えるのは、原文と訳を合わせて 16384 トークン（`-c 65536` を 4 スロットで割った値）まで、訳だけなら 8192 トークン（フックの `max_tokens`）まで。超えた段落はエラーになる。合計の上限は `serve.ts` の `-c` で増やせる。
-- モデルは PLaMo コミュニティライセンスに従う。非商用なら無償。商用利用の条件は、モデルの保存先の `*/LICENSE/ja` を参照する。
+- モデルは PLaMo コミュニティライセンスに従う。非商用なら無償。商用利用の条件は、[ライセンス](https://huggingface.co/pfnet/plamo-3-translate-2b-GGUF/blob/main/LICENSE/ja)を参照する。
