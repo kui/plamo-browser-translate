@@ -1,7 +1,8 @@
-// PLaMo 3 Translate の OpenAI 互換 API サーバーを、バックグラウンドで起動・停止する。
+// PLaMo 3 Translate の OpenAI 互換 API サーバーを、バックグラウンドで起動・停止し、状態を表示する。
 // 使い方: bun run serve start [2b|8b|0.8b|31b]   (既定 2b、ポート 21434)
 //         bun run serve stop
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
+//         bun run serve status
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -10,7 +11,8 @@ type Server = { pid: number; size: string; quant: string };
 class Failure extends Error {}
 
 const sizes = ["0.8b", "2b", "8b", "31b"];
-const usage = `Usage: bun run serve start [${sizes.join("|")}] | stop`;
+const usage = `Usage: bun run serve start [${sizes.join("|")}] | stop | status`;
+const host = "127.0.0.1";
 const port = process.env.PORT || "21434";
 const quant = process.env.QUANT || "Q4_K_M";
 const sleepIdleSeconds = process.env.SLEEP_IDLE_SECONDS || "300";
@@ -25,7 +27,7 @@ const logFile = join(stateDir, `${port}.log`);
 const staleLockMs = 30_000;
 
 // bun の fetch は 127.0.0.1 宛てでも HTTP_PROXY を使うので、プロキシの応答をサーバーの応答と取り違える。
-process.env.NO_PROXY = [process.env.NO_PROXY, "127.0.0.1"].filter(Boolean).join(",");
+process.env.NO_PROXY = [process.env.NO_PROXY, host].filter(Boolean).join(",");
 
 function requireCommand(command: string) {
   if (!Bun.which(command)) {
@@ -42,7 +44,7 @@ function isServer(pid: number): boolean {
   return Bun.spawnSync(command).stdout.toString().includes("llama-server");
 }
 
-// 状態ファイルは、同時に動く start や stop に壊されないよう、必ずこの中で読み書きする。
+// 状態ファイルは、同時に動く start や stop に壊されないよう、この中で読み書きする。status は表示するだけなので例外。
 async function withLock<T>(action: () => Promise<T> | T): Promise<T> {
   mkdirSync(stateDir, { recursive: true });
   for (;;) {
@@ -64,22 +66,25 @@ async function withLock<T>(action: () => Promise<T> | T): Promise<T> {
   }
 }
 
-function runningServer(): Server | undefined {
-  if (!existsSync(stateFile)) return undefined;
+function liveServer(file: string): Server | undefined {
   let server: Partial<Server> = {};
   try {
-    server = JSON.parse(readFileSync(stateFile, "utf8"));
+    server = JSON.parse(readFileSync(file, "utf8")) ?? {};
   } catch {
-    // 壊れたファイルは、動いているサーバーがないのと同じに扱う。
+    // ないファイルや壊れたファイルは、動いているサーバーがないのと同じに扱う。
   }
-  if (server.pid !== undefined && isServer(server.pid)) return server as Server;
-  rmSync(stateFile, { force: true });
-  return undefined;
+  return server.pid !== undefined && isServer(server.pid) ? server as Server : undefined;
 }
 
-async function healthStatus(): Promise<number | undefined> {
+function runningServer(): Server | undefined {
+  const server = liveServer(stateFile);
+  if (server === undefined) rmSync(stateFile, { force: true });
+  return server;
+}
+
+async function healthStatus(target = port): Promise<number | undefined> {
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(1000) });
+    const response = await fetch(`http://${host}:${target}/health`, { signal: AbortSignal.timeout(1000) });
     return response.status;
   } catch {
     return undefined;
@@ -163,7 +168,7 @@ async function start(size: string) {
     "-c", "65536",
     "--parallel", "4",
     "--sleep-idle-seconds", sleepIdleSeconds,
-    "--host", "127.0.0.1",
+    "--host", host,
     "--port", port,
     "--log-file", logFile,
     "--log-colors", "off",
@@ -184,7 +189,7 @@ async function start(size: string) {
       ? `llama-server exited during startup. See ${logFile}`
       : `llama-server exited during startup without writing a log. Run it directly to see the error:\nllama-server ${args.join(" ")}`);
   }
-  console.log(`Listening on http://127.0.0.1:${port} (pid ${server.pid}). Log: ${logFile}`);
+  console.log(`Listening on http://${host}:${port} (pid ${server.pid}). Log: ${logFile}`);
 }
 
 function kill(pid: number, signal: NodeJS.Signals) {
@@ -196,10 +201,12 @@ function kill(pid: number, signal: NodeJS.Signals) {
   }
 }
 
+const foreignServer = (target: string) => `Port ${target} is answered by a server that this command did not start.`;
+
 async function stop() {
   const server = await withLock(runningServer);
   if (server === undefined) {
-    if ((await healthStatus()) !== undefined) throw new Failure(`Port ${port} is answered by a server that this command did not start.`);
+    if ((await healthStatus()) !== undefined) throw new Failure(foreignServer(port));
     console.log("Not running.");
     return;
   }
@@ -213,12 +220,42 @@ async function stop() {
   console.log(`Stopped (pid ${server.pid}).`);
 }
 
+// スクリプトから使えるよう、翻訳を受け付けるサーバーがあるときだけ終了コードを 0 にする。
+async function status() {
+  // PORT を指定しないときは、ポートを知らなくても確かめられるよう、状態ファイルのあるポートもすべて見る。
+  const files = existsSync(stateDir) ? readdirSync(stateDir) : [];
+  const saved = files.flatMap((file) => /^(\d+)\.json$/.exec(file)?.[1] ?? []);
+  const targets = process.env.PORT ? [port] : [...new Set([port, ...saved])];
+  const lines: string[] = [];
+  let ready = false;
+  for (const target of targets) {
+    const server = liveServer(join(stateDir, `${target}.json`));
+    const answer = await healthStatus(target);
+    const url = `http://${host}:${target}`;
+    if (server === undefined) {
+      if (answer !== undefined) lines.push(foreignServer(target));
+      continue;
+    }
+    const details = `(${server.size} ${server.quant}, pid ${server.pid})`;
+    if (answer === 200) {
+      ready = true;
+      lines.push(`Running: listening on ${url} ${details}.`);
+    } else {
+      lines.push(`Starting: ${url} is not ready yet ${details}.`);
+    }
+  }
+  console.log(lines.join("\n") || "Not running.");
+  if (!ready) process.exitCode = 1;
+}
+
 const [command, size = "2b"] = process.argv.slice(2);
 try {
   if (command === "start" && sizes.includes(size)) {
     await start(size);
   } else if (command === "stop") {
     await stop();
+  } else if (command === "status") {
+    await status();
   } else {
     throw new Failure(usage);
   }
