@@ -20,7 +20,7 @@ PLaMo 3 Translate は翻訳先の言語を指示文ではなく `chat_template_k
 bun run serve start
 ```
 
-初回はモデル（2B の Q4_K_M、約 1.8 GB）を取得する。モデルはホームの `.cache/plamo-browser-translate/models` に保存し、同じ PC の git worktree で共有する。サーバーはバックグラウンドで動き、`http://127.0.0.1:8000` で応答するようになると、コマンドは終了する。ターミナルを閉じてもサーバーは止まらない。サーバーの出力は、ホームの `.cache/plamo-browser-translate/<ポート>.log` に書かれる。
+初回はモデル（2B の Q4_K_M、約 1.8 GB）をダウンロードする。モデルは `~/.cache/plamo-browser-translate/models` に保存され、同じマシンの git worktree 間で共有される。サーバーはバックグラウンドで動き、`http://127.0.0.1:8000` で応答するようになると、コマンドは終了する。ターミナルを閉じてもサーバーは止まらない。サーバーの出力は、ホームの `.cache/plamo-browser-translate/<ポート>.log` に書かれる。
 
 モデルのサイズは引数で選べる。
 
@@ -39,7 +39,7 @@ bun run serve stop
 | `start` の引数 | `2b` | `0.8b`、`2b`、`8b`、`31b` |
 | `QUANT` | `Q4_K_M` | GGUF の量子化。リポジトリにあるものを指定する |
 | `PORT` | `8000` | 待ち受けポート。変えたら、`bun run serve stop` にも同じ `PORT` を、`bun run kiss-import` と `bun run verify` には環境変数 `URL` で同じポートの URL を渡す |
-| `MODELS_DIR` | ホームの `.cache/plamo-browser-translate/models` | モデルの保存先 |
+| `MODELS_DIR` | `~/.cache/plamo-browser-translate/models` | モデルの保存先 |
 
 環境変数は、Mac では `PORT=8001 bun run serve start`、Windows の PowerShell では `$env:PORT = 8001; bun run serve start` のように渡す。
 
@@ -95,14 +95,14 @@ Chrome ウェブストアか [Releases](https://github.com/fishjar/kiss-translat
 
 ## フックを検証する
 
-フックを書き換えたら、拡張に入れる前に、サーバーを起動した状態で実行する。KISS Translator と同じ JS インタプリタ（Sval）でフックを読み込み、対応していない翻訳先の拒否、上限で止まった訳のエラー、起動中のサーバーとの往復を確かめる。
+フックを書き換えたら、拡張に入れる前に、サーバーを起動した状態で実行する。KISS Translator と同じ JS インタプリタ（Sval）でフックを読み込み、対応していない翻訳先の拒否、トークン上限で打ち切られた訳のエラー、起動中のサーバーでの翻訳を確認する。
 
 ```bash
 bun install
 bun run verify
 ```
 
-サーバーを起動できないときは、往復を除いて、フック単体とインポート用ファイルの中身だけを確かめられる。
+サーバーを起動できない場合は、`--offline` を付けるとサーバーでの翻訳を省略し、フックとインポート用ファイルだけを検証する。
 
 ```bash
 bun run verify --offline
