@@ -377,6 +377,74 @@ test("a proxy in the environment is not asked about the local server", async () 
   expect(started.code).toBe(0);
 });
 
+test("status reports a running server until it stops", async () => {
+  const dir = makeCheckout("a");
+  const before = await serve(dir, ["status"]);
+  expect(before.output).toContain("Not running");
+  expect(before.code).toBe(1);
+
+  await serve(dir, ["start"]);
+  const { pid } = JSON.parse(readFileSync(stateFile(), "utf8"));
+  const running = await serve(dir, ["status"]);
+  expect(running.output).toContain(`Running: listening on http://127.0.0.1:${port} (2b Q4_K_M, pid ${pid})`);
+  expect(running.code).toBe(0);
+
+  await serve(dir, ["stop"]);
+  const after = await serve(dir, ["status"]);
+  expect(after.output).toContain("Not running");
+  expect(after.code).toBe(1);
+});
+
+test("status reports a server that is still loading as not ready", async () => {
+  const dir = makeCheckout("a");
+  const first = Bun.spawn([process.execPath, "serve.ts", "start"], {
+    cwd: dir, env: environment({ FAKE_LOAD_MS: "60000" }), stdin: "ignore", stdout: "ignore", stderr: "ignore",
+  });
+  while (!existsSync(stateFile()) || !readFileSync(stateFile(), "utf8").includes("pid")) await Bun.sleep(50);
+  first.kill("SIGKILL");
+  await first.exited;
+
+  const loading = await serve(dir, ["status"]);
+  expect(loading.output).toContain(`Starting: http://127.0.0.1:${port} is not ready yet`);
+  expect(loading.code).toBe(1);
+});
+
+test("status reports a port held by another server", async () => {
+  const dir = makeCheckout("a");
+  foreign = Bun.serve({ hostname: "127.0.0.1", port: Number(port), fetch: () => new Response() });
+  const result = await serve(dir, ["status"]);
+  expect(result.output).toContain(`Port ${port} is answered by a server that this command did not start`);
+  expect(result.code).toBe(1);
+});
+
+test("status ignores a stale state file and leaves it alone", async () => {
+  const dir = makeCheckout("a");
+  mkdirSync(join(home, ".cache", "plamo-browser-translate"), { recursive: true });
+  writeFileSync(stateFile(), JSON.stringify({ pid: process.pid, size: "2b", quant: "Q4_K_M" }));
+  const result = await serve(dir, ["status"]);
+  expect(result.output).toContain("Not running");
+  expect(result.code).toBe(1);
+  expect(existsSync(stateFile())).toBe(true);
+  rmSync(stateFile());
+});
+
+test("status finds servers on any port unless PORT narrows it", async () => {
+  const dir = makeCheckout("a");
+  await serve(dir, ["start"]);
+  const free = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
+  const otherPort = String(free.port);
+  void free.stop(true);
+
+  const all = await serve(dir, ["status"], { PORT: "" });
+  expect(all.output).toContain(`http://127.0.0.1:${port} `);
+  expect(all.code).toBe(0);
+
+  const other = await serve(dir, ["status"], { PORT: otherPort });
+  expect(other.output).toContain("Not running");
+  expect(other.output).not.toContain(`:${port} `);
+  expect(other.code).toBe(1);
+});
+
 test("bad usage is an error", async () => {
   const dir = makeCheckout("a");
   for (const args of [[], ["2b"], ["start", "9b"], ["start", "../.."]]) {
