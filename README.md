@@ -55,7 +55,7 @@ bun run serve stop
 bun run autostart install
 ```
 
-モデルのサイズは `bun run autostart install 8b` のように選べる。そのとき設定されている `QUANT`、`PORT`、`SLEEP_IDLE_SECONDS`、`MODELS_DIR` も引き継ぐ。変えるときは、`bun run serve stop` で止めてから `install` をやり直す。
+モデルのサイズは `bun run autostart install 8b` のように選べる。そのとき設定されている `QUANT`、`PORT`、`SLEEP_IDLE_SECONDS`、`MODELS_DIR` も引き継ぎ、登録した値を表示する。変えるときは、`bun run serve stop` で止めてから `install` をやり直す。
 
 登録を消すときは次を実行する。動いているサーバーは止まらないので、止めるときは `bun run serve stop` を実行する。
 

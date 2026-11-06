@@ -32,15 +32,24 @@ if (process.platform !== "win32") {
   process.exit(1);
 }
 
+function problem(name: string, value: string): string | undefined {
+  // conhost --headless が引数を組み立て直すので、値を引用符で囲むと壊れる。囲まない値では cmd がこれらの文字を解釈する。
+  if (/["%&|<>^]/.test(value)) return `must not contain any of: " % & | < > ^`;
+  if (name === "PORT" && !(/^[1-9]\d*$/.test(value) && Number(value) <= 65535)) return "must be a port number from 1 to 65535";
+  if (name === "SLEEP_IDLE_SECONDS" && !/^(-1|[1-9]\d*)$/.test(value)) return "must be a positive integer or -1";
+  return undefined;
+}
+
 const [command, size = "2b"] = process.argv.slice(2);
 if (command === "install" && sizes.includes(size)) {
   // タスクは登録時の環境変数を引き継がないので、指定された値をコマンドに埋め込む。
-  // conhost --headless が引数を組み立て直すので、値を引用符で囲むと壊れる。囲まない値では cmd がこれらの文字を解釈する。
   const names = ["QUANT", "PORT", "SLEEP_IDLE_SECONDS", "MODELS_DIR"].filter((name) => process.env[name]);
-  const unsafe = names.find((name) => /["%&|<>^]/.test(process.env[name]!));
-  if (unsafe) {
-    console.error(`${unsafe} must not contain any of: " % & | < > ^`);
-    process.exit(1);
+  for (const name of names) {
+    const found = problem(name, process.env[name]!);
+    if (found) {
+      console.error(`${name} ${found}`);
+      process.exit(1);
+    }
   }
   // 動かない設定を登録しないよう、先に起動を確かめる。ログオン時はこの結果が画面に出ない。
   const started = Bun.spawnSync([process.execPath, "serve.ts", "start", size], {
@@ -53,7 +62,9 @@ if (command === "install" && sizes.includes(size)) {
     TASK_ARGUMENT: `--headless cmd /c "${sets}bun serve.ts start ${size} > serve.log 2>&1"`,
     TASK_DIR: import.meta.dir,
   });
-  console.log(`Registered task "${taskName}".`);
+  // シェルに残っていた PORT なども固定されるので、何を登録したかを見せる。
+  const settings = [size, ...names.map((name) => `${name}=${process.env[name]}`)].join(", ");
+  console.log(`Registered task "${taskName}" (${settings}).`);
 } else if (command === "uninstall") {
   powershell(unregister);
   console.log(`Removed task "${taskName}". A running server keeps running; use "bun run serve stop" to stop it.`);
