@@ -34,17 +34,21 @@ if (process.platform !== "win32") {
 
 const [command, size = "2b"] = process.argv.slice(2);
 if (command === "install" && sizes.includes(size)) {
+  // タスクは登録時の環境変数を引き継がないので、指定された値をコマンドに埋め込む。
+  // conhost --headless が引数を組み立て直すので、値を引用符で囲むと壊れる。囲まない値では cmd がこれらの文字を解釈する。
+  const names = ["QUANT", "PORT", "SLEEP_IDLE_SECONDS", "MODELS_DIR"].filter((name) => process.env[name]);
+  const unsafe = names.find((name) => /["%&|<>^]/.test(process.env[name]!));
+  if (unsafe) {
+    console.error(`${unsafe} must not contain any of: " % & | < > ^`);
+    process.exit(1);
+  }
   // 動かない設定を登録しないよう、先に起動を確かめる。ログオン時はこの結果が画面に出ない。
   const started = Bun.spawnSync([process.execPath, "serve.ts", "start", size], {
     cwd: import.meta.dir,
     stdio: ["inherit", "inherit", "inherit"],
   });
   if (started.exitCode !== 0) process.exit(started.exitCode);
-  // タスクは登録時の環境変数を引き継がないので、指定された値をコマンドに埋め込む。
-  const sets = ["QUANT", "PORT", "SLEEP_IDLE_SECONDS"]
-    .filter((name) => process.env[name])
-    .map((name) => `set "${name}=${process.env[name]}"&& `)
-    .join("");
+  const sets = names.map((name) => `set ${name}=${process.env[name]}&& `).join("");
   powershell(register, {
     TASK_ARGUMENT: `--headless cmd /c "${sets}bun serve.ts start ${size} > serve.log 2>&1"`,
     TASK_DIR: import.meta.dir,
