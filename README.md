@@ -49,21 +49,22 @@ bun run serve stop
 
 ## ログオン時に自動で起動する（Windows）
 
-タスクスケジューラに登録すると、ログオンのたびにウィンドウを出さずに起動する。登録するとすぐに起動もする。
+タスクスケジューラに `bun run serve start` を登録すると、ログオンのたびにウィンドウを出さずに起動する。登録の前に一度起動して、動くことを確かめる。
 
 ```bash
 bun run autostart install
 ```
 
-モデルのサイズは `bun run autostart install 8b` のように選べる。そのとき設定されている `QUANT`、`PORT`、`SLEEP_IDLE_SECONDS` も引き継ぐ。変えるときは `install` をやり直す。
+モデルのサイズは `bun run autostart install 8b` のように選べる。そのとき設定されている `QUANT`、`PORT`、`SLEEP_IDLE_SECONDS` も引き継ぐ。変えるときは、`bun run serve stop` で止めてから `install` をやり直す。
 
-| コマンド | 動作 |
-|---|---|
-| `bun run autostart stop` | サーバーを今すぐ止める。次のログオンでまた起動する |
-| `bun run autostart start` | 止めたサーバーを起動する |
-| `bun run autostart uninstall` | サーバーを止めて、登録を消す |
+登録を消すときは次を実行する。動いているサーバーは止まらないので、止めるときは `bun run serve stop` を実行する。
 
-- サーバーの出力は `serve.log` に書かれる。起動しないときはここを見る。初回はモデルを取得するので、待ち受けるまで時間がかかる。
+```bash
+bun run autostart uninstall
+```
+
+- 今すぐ止めるときは `bun run serve stop` を実行する。次のログオンでまた起動する。`PORT` を変えているなら、同じ `PORT` を渡す。
+- ログオン時の `bun run serve start` の出力は `serve.log` に書かれる。起動しないときはここを見る。
 - タスクは `bun` と `llama-server` を、ユーザー環境変数の `PATH` から探す。mise は [shims を `PATH` に入れる](https://mise.jdx.dev/dev-tools/shims.html)。シェルのプロファイルで有効化するだけだと、タスクから `bun` が見つからない。
 - 登録したフォルダーのファイルを使うので、リポジトリを動かしたら `install` をやり直す。
 
