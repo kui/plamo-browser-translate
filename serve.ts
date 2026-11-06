@@ -18,6 +18,9 @@ const logFile = join(stateDir, `${port}.log`);
 // spawn より前に状態ファイルを作るので、作った start が中断すると pid のないまま残る。起動にかかる時間より十分長く待って見切る。
 const claimTimeoutMs = 30_000;
 
+// bun の fetch は 127.0.0.1 宛てでも HTTP_PROXY を使うので、プロキシの応答をサーバーの応答と取り違える。
+process.env.NO_PROXY = [process.env.NO_PROXY, "127.0.0.1"].filter(Boolean).join(",");
+
 function requireCommand(command: string) {
   if (!Bun.which(command)) {
     console.error(`${command} is not on PATH. See the requirements in README.md.`);
@@ -91,7 +94,7 @@ async function healthStatus(): Promise<number | undefined> {
   }
 }
 
-function spawnServer(args: string[]): number {
+function spawnServer(args: string[]): number | undefined {
   if (process.platform !== "win32") {
     const server = Bun.spawn(["llama-server", ...args], { cwd: stateDir, stdio: ["ignore", "ignore", "ignore"], detached: true });
     server.unref();
@@ -102,18 +105,23 @@ function spawnServer(args: string[]): number {
   const { stdout, exitCode } = Bun.spawnSync(
     ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
       "(Start-Process llama-server -ArgumentList $env:SERVER_ARGS -WorkingDirectory $env:SERVER_CWD -WindowStyle Hidden -PassThru).Id"],
-    { env: { ...process.env, SERVER_ARGS: args.map((arg) => `"${arg}"`).join(" "), SERVER_CWD: stateDir } },
+    { env: { ...process.env, SERVER_ARGS: args.map((arg) => `"${arg}"`).join(" "), SERVER_CWD: stateDir }, stderr: "inherit" },
   );
-  if (exitCode !== 0) process.exit(exitCode);
-  return Number(stdout.toString());
+  const pid = Number(stdout.toString());
+  return exitCode === 0 && Number.isInteger(pid) && pid > 0 ? pid : undefined;
 }
 
 async function waitUntilListening(pid: number): Promise<boolean> {
+  let announced = false;
   while (isServer(pid)) {
     if ((await healthStatus()) === 200) {
       // ポートを取れなかったサーバーは、そのポートにいる別のサーバーの 200 を受けた時点ではまだ終了していないことがある。
       await Bun.sleep(500);
       return isServer(pid);
+    }
+    if (!announced) {
+      console.log(`Waiting for the server to load (pid ${pid}). Interrupting this leaves it running; use "bun run serve stop" to stop it.`);
+      announced = true;
     }
     await Bun.sleep(200);
   }
@@ -127,7 +135,15 @@ async function launch(size: string, args: string[]): Promise<Server> {
     console.error(`Another server is already listening on port ${port}.`);
     process.exit(1);
   }
-  const server = { pid: spawnServer(args), size, quant };
+  // 失敗の原因を読むときに前回のログを読まないよう、先に消す。引数の解析エラーなどはログに書かれない。
+  rmSync(logFile, { force: true });
+  const pid = spawnServer(args);
+  if (pid === undefined) {
+    rmSync(stateFile, { force: true });
+    console.error("Could not start llama-server.");
+    process.exit(1);
+  }
+  const server = { pid, size, quant };
   await Bun.write(stateFile, JSON.stringify(server));
   return server;
 }
@@ -175,10 +191,21 @@ async function start(size: string) {
   }
   if (!(await waitUntilListening(server.pid))) {
     forgetServer(server.pid);
-    console.error(`llama-server exited during startup. See ${logFile}`);
+    console.error(existsSync(logFile)
+      ? `llama-server exited during startup. See ${logFile}`
+      : `llama-server exited during startup without writing a log. Run it directly to see the error:\nllama-server ${args.join(" ")}`);
     process.exit(1);
   }
   console.log(`Listening on http://127.0.0.1:${port} (pid ${server.pid}). Log: ${logFile}`);
+}
+
+function kill(pid: number, signal: NodeJS.Signals) {
+  try {
+    process.kill(pid, signal);
+  } catch (error) {
+    // 確かめてから送るまでの間に終了していれば、止める目的は果たせている。
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
 }
 
 async function stop() {
@@ -192,10 +219,10 @@ async function stop() {
     return;
   }
   // Windows ではこの SIGTERM も強制終了になる。llama-server に保存する状態はないので、どちらでも問題ない。
-  process.kill(server.pid, "SIGTERM");
+  kill(server.pid, "SIGTERM");
   const deadline = Date.now() + 10_000;
   while (isServer(server.pid) && Date.now() < deadline) await Bun.sleep(100);
-  if (isServer(server.pid)) process.kill(server.pid, "SIGKILL");
+  if (isServer(server.pid)) kill(server.pid, "SIGKILL");
   while (isServer(server.pid)) await Bun.sleep(100);
   forgetServer(server.pid);
   console.log(`Stopped (pid ${server.pid}).`);
