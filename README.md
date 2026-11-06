@@ -20,7 +20,7 @@ PLaMo 3 Translate は翻訳先の言語を指示文ではなく `chat_template_k
 bun run serve start
 ```
 
-初回はモデル（2B の Q4_K_M、約 1.8 GB）を `models/` に取得する。サーバーはバックグラウンドで動き、`http://127.0.0.1:8000` で応答するようになると、コマンドは終了する。ターミナルを閉じてもサーバーは止まらない。サーバーの出力は `serve.log` に書かれる。
+初回はモデル（2B の Q4_K_M、約 1.8 GB）を `models/` に取得する。サーバーはバックグラウンドで動き、`http://127.0.0.1:8000` で応答するようになると、コマンドは終了する。ターミナルを閉じてもサーバーは止まらない。サーバーの出力は、ホームの `.cache/plamo-browser-translate/<ポート>.log` に書かれる。
 
 モデルのサイズは引数で選べる。
 
@@ -28,7 +28,7 @@ bun run serve start
 bun run serve start 8b
 ```
 
-止めるときは次を実行する。設定やモデルを変えるときは、止めてから起動し直す。
+止めるときは次を実行する。どのワークツリーからでも止められる。動いているものと違うサイズや `QUANT` を指定した `start` はエラーになるので、変えるときは止めてから起動し直す。
 
 ```bash
 bun run serve stop
@@ -38,7 +38,7 @@ bun run serve stop
 |---|---|---|
 | `start` の引数 | `2b` | `0.8b`、`2b`、`8b`、`31b` |
 | `QUANT` | `Q4_K_M` | GGUF の量子化。リポジトリにあるものを指定する |
-| `PORT` | `8000` | 待ち受けポート。変えたら、`bun run kiss-import` と `bun run verify` にも環境変数 `URL` で同じポートの URL を渡す |
+| `PORT` | `8000` | 待ち受けポート。変えたら、`bun run serve stop` にも同じ `PORT` を、`bun run kiss-import` と `bun run verify` には環境変数 `URL` で同じポートの URL を渡す |
 
 環境変数は、Mac では `PORT=8001 bun run serve start`、Windows の PowerShell では `$env:PORT = 8001; bun run serve start` のように渡す。
 
