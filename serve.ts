@@ -1,8 +1,7 @@
 // PLaMo 3 Translate の OpenAI 互換 API サーバーを、バックグラウンドで起動・停止する。
 // 使い方: bun run serve start [2b|8b|0.8b|31b]   (既定 2b、ポート 21434)
 //         bun run serve stop
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -15,6 +14,7 @@ const usage = `Usage: bun run serve start [${sizes.join("|")}] | stop`;
 const port = process.env.PORT || "21434";
 const quant = process.env.QUANT || "Q4_K_M";
 const sleepIdleSeconds = process.env.SLEEP_IDLE_SECONDS || "300";
+const hfEndpoint = process.env.HF_ENDPOINT || "https://huggingface.co";
 // ポートはマシン全体で 1 つなので、状態もワークツリーではなくポートごとに持つ。どのワークツリーからでも同じサーバーを扱える。
 const stateDir = join(homedir(), ".cache", "plamo-browser-translate");
 const modelsDir = process.env.MODELS_DIR || join(stateDir, "models");
@@ -103,16 +103,18 @@ function spawnServer(args: string[]): number | undefined {
   return exitCode === 0 && Number.isInteger(pid) && pid > 0 ? pid : undefined;
 }
 
-async function waitUntilListening(pid: number): Promise<boolean> {
+async function waitUntilListening(pid: number, gguf: string): Promise<boolean> {
   let announced = false;
   while (isServer(pid)) {
-    if ((await healthStatus()) === 200) {
+    // サーバーはダウンロードの間ポートを開かないので、この間の応答は別のサーバーのもの。
+    if (existsSync(gguf) && (await healthStatus()) === 200) {
       // ポートを取れなかったサーバーは、そのポートにいる別のサーバーの 200 を受けた時点ではまだ終了していないことがある。
       await Bun.sleep(500);
       return isServer(pid);
     }
     if (!announced) {
-      console.log(`Waiting for the server to load (pid ${pid}). Interrupting this leaves it running; use "bun run serve stop" to stop it.`);
+      const task = existsSync(gguf) ? "load" : `download ${gguf} and load it`;
+      console.log(`Waiting for the server to ${task} (pid ${pid}). Interrupting this leaves it running; use "bun run serve stop" to stop it.`);
       announced = true;
     }
     await Bun.sleep(200);
@@ -121,7 +123,6 @@ async function waitUntilListening(pid: number): Promise<boolean> {
 }
 
 async function launch(size: string, args: string[]): Promise<Server> {
-  // モデルの取得には時間がかかるので、ポートの確認は取得のあと、起動の直前に行う。
   if ((await healthStatus()) !== undefined) throw new Failure(`Another server is already listening on port ${port}.`);
   // 失敗の原因を読むときに前回のログを読まないよう、先に消す。引数の解析エラーなどはログに書かれない。
   rmSync(logFile, { force: true });
@@ -132,16 +133,14 @@ async function launch(size: string, args: string[]): Promise<Server> {
   return server;
 }
 
-// hf は中断されたダウンロードの一時ファイルを残し、再実行しても再利用も削除もしない。
-// 同じファイルのダウンロードはロックで直列化されるので、成功後に残っているものは不要。
-// 名前の先頭は huggingface_hub の _short_hash(`${filename}.metadata`) で、別の量子化をダウンロード中のファイルは対象にならない。
-function removeInterruptedDownloads(dir: string, filename: string) {
-  const downloads = join(dir, ".cache", "huggingface", "download");
-  if (!existsSync(downloads)) return;
-  const prefix = createHash("sha1").update(`${filename}.metadata`).digest("base64url");
-  for (const name of readdirSync(downloads)) {
-    if (name.startsWith(prefix) && name.endsWith(".incomplete")) rmSync(join(downloads, name), { force: true });
-  }
+// llama-server にはチャットテンプレートをダウンロードするオプションがない。
+async function downloadTemplate(url: string, template: string, dir: string) {
+  const response = await fetch(url).catch(() => undefined);
+  if (!response?.ok) throw new Failure(`Could not download ${url}${response ? ` (status ${response.status})` : ""}.`);
+  mkdirSync(dir, { recursive: true });
+  const temporary = `${template}.${process.pid}`;
+  await Bun.write(temporary, response);
+  renameSync(temporary, template);
 }
 
 async function start(size: string) {
@@ -151,10 +150,13 @@ async function start(size: string) {
   const ggufName = `plamo-3-translate-${size}-${quant}.gguf`;
   const gguf = join(dir, ggufName);
   const template = join(dir, "chat_template.jinja");
+  const repo = `${hfEndpoint}/pfnet/plamo-3-translate-${size}-GGUF/resolve/main`;
   // GGUF に埋め込まれたテンプレートは古いので、同梱の chat_template.jinja を必ず使う（モデルカードの指示）。
   // -c は 4 スロットで割られる。1 スロット 16384 トークンあれば、長い段落でも入力と訳の両方が収まる。
   const args = [
     "-m", gguf,
+    // ダウンロードは llama-server に任せる。中断しても次の起動で続きから再開する。
+    ...(existsSync(gguf) ? [] : ["-mu", `${repo}/${ggufName}`]),
     "--chat-template-file", template,
     "--no-prefill-assistant",
     "--alias", "plamo-3-translate",
@@ -169,23 +171,14 @@ async function start(size: string) {
 
   let server = await withLock(runningServer);
   if (server === undefined) {
-    if (!(await Bun.file(gguf).exists()) || !(await Bun.file(template).exists())) {
-      requireCommand("uvx");
-      const download = Bun.spawn([
-        "uvx", "--from", "huggingface_hub", "hf", "download", `pfnet/plamo-3-translate-${size}-GGUF`, ggufName,
-        "chat_template.jinja", "LICENSE/ja", "LICENSE/en", "--local-dir", dir,
-      ], { stdio: ["inherit", "inherit", "inherit"] });
-      const status = await download.exited;
-      if (status !== 0) process.exit(status);
-      removeInterruptedDownloads(dir, ggufName);
-    }
+    if (!existsSync(template)) await downloadTemplate(`${repo}/chat_template.jinja`, template, dir);
     server = await withLock(async () => runningServer() ?? await launch(size, args));
   }
 
   if (server.size !== size || server.quant !== quant) {
     throw new Failure(`Already running ${server.size} ${server.quant} on port ${port} (pid ${server.pid}). To change the settings, run stop first.`);
   }
-  if (!(await waitUntilListening(server.pid))) {
+  if (!(await waitUntilListening(server.pid, gguf))) {
     await withLock(runningServer);
     throw new Failure(existsSync(logFile)
       ? `llama-server exited during startup. See ${logFile}`

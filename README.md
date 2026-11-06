@@ -4,7 +4,7 @@
 
 ## 必要なもの
 
-- llama.cpp: Mac は `brew install llama.cpp`、Windows は `winget install ggml.llamacpp`
+- llama.cpp: Mac は `brew install llama.cpp`、Windows は `winget install ggml.llamacpp` のあと新しいターミナルを開く
 - [mise](https://mise.jdx.dev/): [有効化](https://mise.jdx.dev/getting-started.html#activate-mise)してから `mise install` を実行する
 - Chrome 拡張の [KISS Translator](https://github.com/fishjar/kiss-translator) v2.1.1 以降
 
@@ -58,4 +58,4 @@
 
 ## ライセンス
 
-モデルは PLaMo コミュニティライセンスに従う。非商用なら無償。商用利用の条件は、モデルの保存先の `*/LICENSE/ja` を参照する。
+モデルは PLaMo コミュニティライセンスに従う。非商用なら無償。商用利用の条件は、[ライセンス](https://huggingface.co/pfnet/plamo-3-translate-2b-GGUF/blob/main/LICENSE/ja)を参照する。
