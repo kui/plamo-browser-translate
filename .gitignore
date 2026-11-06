@@ -1,3 +1,5 @@
 models/
 node_modules/
 kiss-setting-plamo.json
+serve.log
+serve.pid

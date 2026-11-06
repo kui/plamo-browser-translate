@@ -14,25 +14,33 @@ PLaMo 3 Translate は翻訳先の言語を指示文ではなく `chat_template_k
 - llama.cpp（Mac は `brew install llama.cpp`、Windows は `winget install ggml.llamacpp` のあと新しいターミナルを開く）
 - [mise](https://mise.jdx.dev/)（[有効化](https://mise.jdx.dev/getting-started.html#activate-mise)してから `mise install` を実行すると、bun と、モデルの取得に使う uv が入る）
 
-## サーバーを起動する
+## サーバーを起動・停止する
 
 ```bash
-bun run serve
+bun run serve start
 ```
 
-初回はモデル（2B の Q4_K_M、約 1.8 GB）を `models/` に取得してから、`http://127.0.0.1:8000` で待ち受ける。モデルのサイズは引数で選べる。
+初回はモデル（2B の Q4_K_M、約 1.8 GB）を `models/` に取得する。サーバーはバックグラウンドで動き、`http://127.0.0.1:8000` で応答するようになると、コマンドは終了する。ターミナルを閉じてもサーバーは止まらない。サーバーの出力は `serve.log` に書かれる。
+
+モデルのサイズは引数で選べる。
 
 ```bash
-bun run serve 8b
+bun run serve start 8b
+```
+
+止めるときは次を実行する。設定やモデルを変えるときは、止めてから起動し直す。
+
+```bash
+bun run serve stop
 ```
 
 | 変数 | 既定値 | 意味 |
 |---|---|---|
-| 第 1 引数 | `2b` | `0.8b`、`2b`、`8b`、`31b` |
+| `start` の引数 | `2b` | `0.8b`、`2b`、`8b`、`31b` |
 | `QUANT` | `Q4_K_M` | GGUF の量子化。リポジトリにあるものを指定する |
 | `PORT` | `8000` | 待ち受けポート。変えたら、`bun run kiss-import` と `bun run verify` にも環境変数 `URL` で同じポートの URL を渡す |
 
-環境変数は、Mac では `PORT=8001 bun run serve`、Windows の PowerShell では `$env:PORT = 8001; bun run serve` のように渡す。
+環境変数は、Mac では `PORT=8001 bun run serve start`、Windows の PowerShell では `$env:PORT = 8001; bun run serve start` のように渡す。
 
 ## KISS Translator に API を足す
 
