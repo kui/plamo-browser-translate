@@ -20,7 +20,7 @@ PLaMo 3 Translate は翻訳先の言語を指示文ではなく `chat_template_k
 bun run serve start
 ```
 
-初回はモデル（2B の Q4_K_M、約 1.8 GB）をダウンロードする。進捗は表示されない。`bun run serve stop` で止めても、次の `start` で続きから再開する。モデルは `~/.cache/plamo-browser-translate/models` に保存され、同じマシンの git worktree 間で共有される。サーバーはバックグラウンドで動き、`http://127.0.0.1:21434` で応答するようになると、コマンドは終了する。ターミナルを閉じてもサーバーは止まらない。サーバーの出力は、ホームの `.cache/plamo-browser-translate/<ポート>.log` に書かれる。
+初回はモデル（2B の Q4_K_M、約 1.8 GB）をダウンロードする。`bun run serve stop` で止めても、次の `start` で続きから再開する。モデルは `~/.cache/plamo-browser-translate/models` に保存され、同じマシンの git worktree 間で共有される。サーバーはバックグラウンドで動き、`http://127.0.0.1:21434` で応答するようになると、コマンドは終了する。ターミナルを閉じてもサーバーは止まらない。サーバーの出力は、ホームの `.cache/plamo-browser-translate/<ポート>.log` に書かれる。
 
 モデルのサイズは引数で選べる。
 
