@@ -1,7 +1,8 @@
 // PLaMo 3 Translate の OpenAI 互換 API サーバーを、バックグラウンドで起動・停止する。
 // 使い方: bun run serve start [2b|8b|0.8b|31b]   (既定 2b、ポート 8000)
 //         bun run serve stop
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -130,6 +131,18 @@ async function launch(size: string, args: string[]): Promise<Server> {
   return server;
 }
 
+// hf は中断されたダウンロードの一時ファイルを残し、再実行しても再利用も削除もしない。
+// 同じファイルのダウンロードはロックで直列化されるので、成功後に残っているものは不要。
+// 名前の先頭は huggingface_hub の _short_hash(`${filename}.metadata`) で、別の量子化をダウンロード中のファイルは対象にならない。
+function removeInterruptedDownloads(dir: string, filename: string) {
+  const downloads = join(dir, ".cache", "huggingface", "download");
+  if (!existsSync(downloads)) return;
+  const prefix = createHash("sha1").update(`${filename}.metadata`).digest("base64url");
+  for (const name of readdirSync(downloads)) {
+    if (name.startsWith(prefix) && name.endsWith(".incomplete")) rmSync(join(downloads, name), { force: true });
+  }
+}
+
 async function start(size: string) {
   requireCommand("llama-server");
 
@@ -162,6 +175,7 @@ async function start(size: string) {
       ], { stdio: ["inherit", "inherit", "inherit"] });
       const status = await download.exited;
       if (status !== 0) process.exit(status);
+      removeInterruptedDownloads(dir, ggufName);
     }
     server = await withLock(async () => runningServer() ?? await launch(size, args));
   }

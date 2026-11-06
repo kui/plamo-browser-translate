@@ -314,6 +314,24 @@ test("MODELS_DIR replaces the model location", async () => {
   expect(missing.code).toBe(3);
 });
 
+test("a successful download removes only its own interrupted files", async () => {
+  const dir = makeCheckout("a");
+  const downloads = join(modelsDir(), "plamo-3-translate-0.8b-GGUF", ".cache", "huggingface", "download");
+  mkdirSync(downloads, { recursive: true });
+  // 実際の hf が plamo-3-translate-0.8b-Q4_K_M.gguf の中断時に残した名前。
+  const own = join(downloads, "ZTqpEIrLb8A8hMNOyQa0DdQOCc4=.3dbb09295bfd.75d925c4.incomplete");
+  const otherQuant = join(downloads, "AAAAAAAAAAAAAAAAAAAAAAAAAAA=.3dbb09295bfd.75d925c4.incomplete");
+  writeFileSync(own, "");
+  writeFileSync(otherQuant, "");
+
+  expect((await serve(dir, ["start", "0.8b"], { FAKE_DOWNLOAD_CODE: "3" })).code).toBe(3);
+  expect(existsSync(own)).toBe(true);
+
+  expect((await serve(dir, ["start", "0.8b"])).code).toBe(0);
+  expect(existsSync(own)).toBe(false);
+  expect(existsSync(otherQuant)).toBe(true);
+});
+
 test("a failed model download does not start the server", async () => {
   const dir = makeCheckout("a");
   rmSync(modelsDir(), { recursive: true });
