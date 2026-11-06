@@ -16,12 +16,16 @@ let foreign: ReturnType<typeof Bun.serve> | undefined;
 
 function makeCheckout(name: string): string {
   const dir = join(root, name);
-  const models = join(dir, "models", "plamo-3-translate-2b-GGUF");
-  mkdirSync(models, { recursive: true });
+  mkdirSync(dir, { recursive: true });
   copyFileSync(join(import.meta.dir, "..", "serve.ts"), join(dir, "serve.ts"));
-  writeFileSync(join(models, "plamo-3-translate-2b-Q4_K_M.gguf"), "");
-  writeFileSync(join(models, "chat_template.jinja"), "");
   return dir;
+}
+
+function writeModel(modelsDir: string) {
+  const model = join(modelsDir, "plamo-3-translate-2b-GGUF");
+  mkdirSync(model, { recursive: true });
+  writeFileSync(join(model, "plamo-3-translate-2b-Q4_K_M.gguf"), "");
+  writeFileSync(join(model, "chat_template.jinja"), "");
 }
 
 function environment(extra: Record<string, string>): Record<string, string> {
@@ -56,6 +60,7 @@ async function health(): Promise<number | undefined> {
 
 const stateFile = () => join(home, ".cache", "plamo-browser-translate", `${port}.json`);
 const logFile = () => join(home, ".cache", "plamo-browser-translate", `${port}.log`);
+const modelsDir = () => join(home, ".cache", "plamo-browser-translate", "models");
 
 beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), "serve-test-"));
@@ -74,6 +79,7 @@ afterAll(() => {
 
 beforeEach(() => {
   home = mkdtempSync(join(root, "home-"));
+  writeModel(modelsDir());
   const free = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
   port = String(free.port);
   void free.stop(true);
@@ -276,7 +282,7 @@ test("a server that stops right after answering is not reported as started", asy
 
 test("the port is checked after the model download", async () => {
   const dir = makeCheckout("a");
-  rmSync(join(dir, "models"), { recursive: true });
+  rmSync(modelsDir(), { recursive: true });
   const starting = serve(dir, ["start"], { FAKE_DOWNLOAD_MS: "3000" });
   await Bun.sleep(1000);
   foreign = Bun.serve({ hostname: "127.0.0.1", port: Number(port), fetch: () => new Response() });
@@ -286,9 +292,49 @@ test("the port is checked after the model download", async () => {
   expect(existsSync(stateFile())).toBe(false);
 });
 
+test("checkouts share the model in the home directory", async () => {
+  const dir = makeCheckout("a");
+  const started = await serve(dir, ["start"], { FAKE_DOWNLOAD_CODE: "3" });
+  expect(started.output).toContain("Listening on");
+  expect(started.code).toBe(0);
+  expect(existsSync(join(dir, "models"))).toBe(false);
+});
+
+test("MODELS_DIR replaces the model location", async () => {
+  const dir = makeCheckout("a");
+  const elsewhere = join(home, "日本語 パス");
+  rmSync(modelsDir(), { recursive: true });
+  writeModel(elsewhere);
+  const started = await serve(dir, ["start"], { FAKE_DOWNLOAD_CODE: "3", MODELS_DIR: elsewhere });
+  expect(started.output).toContain("Listening on");
+  expect(started.code).toBe(0);
+  await serve(dir, ["stop"]);
+
+  const missing = await serve(dir, ["start"], { FAKE_DOWNLOAD_CODE: "3", MODELS_DIR: join(home, "empty") });
+  expect(missing.code).toBe(3);
+});
+
+test("a successful download removes only its own interrupted files", async () => {
+  const dir = makeCheckout("a");
+  const downloads = join(modelsDir(), "plamo-3-translate-0.8b-GGUF", ".cache", "huggingface", "download");
+  mkdirSync(downloads, { recursive: true });
+  // 実際の hf が plamo-3-translate-0.8b-Q4_K_M.gguf の中断時に残した名前。
+  const own = join(downloads, "ZTqpEIrLb8A8hMNOyQa0DdQOCc4=.3dbb09295bfd.75d925c4.incomplete");
+  const otherQuant = join(downloads, "AAAAAAAAAAAAAAAAAAAAAAAAAAA=.3dbb09295bfd.75d925c4.incomplete");
+  writeFileSync(own, "");
+  writeFileSync(otherQuant, "");
+
+  expect((await serve(dir, ["start", "0.8b"], { FAKE_DOWNLOAD_CODE: "3" })).code).toBe(3);
+  expect(existsSync(own)).toBe(true);
+
+  expect((await serve(dir, ["start", "0.8b"])).code).toBe(0);
+  expect(existsSync(own)).toBe(false);
+  expect(existsSync(otherQuant)).toBe(true);
+});
+
 test("a failed model download does not start the server", async () => {
   const dir = makeCheckout("a");
-  rmSync(join(dir, "models"), { recursive: true });
+  rmSync(modelsDir(), { recursive: true });
   const failed = await serve(dir, ["start"], { FAKE_DOWNLOAD_CODE: "3" });
   expect(failed.code).toBe(3);
   const killed = await serve(dir, ["start"], { FAKE_DOWNLOAD_SIGNAL: "1" });
