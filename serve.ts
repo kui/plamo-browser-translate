@@ -1,15 +1,28 @@
-// PLaMo 3 Translate を OpenAI 互換 API として起動する。
-// 使い方: bun run serve [2b|8b|0.8b|31b]   (既定 2b、ポート 8000)
+// PLaMo 3 Translate の OpenAI 互換 API サーバーを、バックグラウンドで起動・停止する。
+// 使い方: bun run serve start [2b|8b|0.8b|31b]   (既定 2b、ポート 8000)
+//         bun run serve stop
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
-const size = process.argv[2] || "2b";
-const quant = process.env.QUANT || "Q4_K_M";
+type Server = { pid: number; size: string; quant: string };
+
+class Failure extends Error {}
+
+const sizes = ["0.8b", "2b", "8b", "31b"];
+const usage = `Usage: bun run serve start [${sizes.join("|")}] | stop`;
 const port = process.env.PORT || "8000";
-const repo = `pfnet/plamo-3-translate-${size}-GGUF`;
-const dir = join(import.meta.dir, "models", `plamo-3-translate-${size}-GGUF`);
-const ggufName = `plamo-3-translate-${size}-${quant}.gguf`;
-const gguf = join(dir, ggufName);
-const template = join(dir, "chat_template.jinja");
+const quant = process.env.QUANT || "Q4_K_M";
+// ポートはマシン全体で 1 つなので、状態もワークツリーではなくポートごとに持つ。どのワークツリーからでも同じサーバーを扱える。
+const stateDir = join(homedir(), ".cache", "plamo-browser-translate");
+const stateFile = join(stateDir, `${port}.json`);
+const lockDir = join(stateDir, `${port}.lock`);
+const logFile = join(stateDir, `${port}.log`);
+// ロックの中でするのは状態の確認とサーバーの起動だけ。保持したまま落ちた場合に備え、それより十分長く待って奪う。
+const staleLockMs = 30_000;
+
+// bun の fetch は 127.0.0.1 宛てでも HTTP_PROXY を使うので、プロキシの応答をサーバーの応答と取り違える。
+process.env.NO_PROXY = [process.env.NO_PROXY, "127.0.0.1"].filter(Boolean).join(",");
 
 function requireCommand(command: string) {
   if (!Bun.which(command)) {
@@ -18,30 +31,189 @@ function requireCommand(command: string) {
   }
 }
 
-function run(command: string, args: string[]): number {
-  return Bun.spawnSync([command, ...args], { stdio: ["inherit", "inherit", "inherit"] }).exitCode;
+// PID は OS の再起動などで別のプロセスに再利用されるので、プロセス名も確かめる。
+function isServer(pid: number): boolean {
+  const command = process.platform === "win32"
+    ? ["tasklist", "/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"]
+    : ["ps", "-o", "comm=", "-p", String(pid)];
+  return Bun.spawnSync(command).stdout.toString().includes("llama-server");
 }
 
-requireCommand("llama-server");
-
-if (!(await Bun.file(gguf).exists()) || !(await Bun.file(template).exists())) {
-  requireCommand("uvx");
-  const status = run("uvx", [
-    "--from", "huggingface_hub", "hf", "download", repo, ggufName,
-    "chat_template.jinja", "LICENSE/ja", "LICENSE/en", "--local-dir", dir,
-  ]);
-  if (status !== 0) process.exit(status);
+// 状態ファイルは、同時に動く start や stop に壊されないよう、必ずこの中で読み書きする。
+async function withLock<T>(action: () => Promise<T> | T): Promise<T> {
+  mkdirSync(stateDir, { recursive: true });
+  for (;;) {
+    try {
+      mkdirSync(lockDir);
+      break;
+    } catch (error) {
+      // Windows では、削除中のフォルダを作ろうとすると EPERM になる。
+      if (!["EEXIST", "EPERM"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+    }
+    const lock = statSync(lockDir, { throwIfNoEntry: false });
+    if (lock && Date.now() - lock.mtimeMs > staleLockMs) rmSync(lockDir, { recursive: true, force: true, maxRetries: 5 });
+    await Bun.sleep(50);
+  }
+  try {
+    return await action();
+  } finally {
+    rmSync(lockDir, { recursive: true, force: true, maxRetries: 5 });
+  }
 }
 
-// GGUF に埋め込まれたテンプレートは古いので、同梱の chat_template.jinja を必ず使う（モデルカードの指示）。
-// -c は 4 スロットで割られる。1 スロット 16384 トークンあれば、長い段落でも入力と訳の両方が収まる。
-process.exit(run("llama-server", [
-  "-m", gguf,
-  "--chat-template-file", template,
-  "--no-prefill-assistant",
-  "--alias", "plamo-3-translate",
-  "-c", "65536",
-  "--parallel", "4",
-  "--host", "127.0.0.1",
-  "--port", port,
-]));
+function runningServer(): Server | undefined {
+  if (!existsSync(stateFile)) return undefined;
+  let server: Partial<Server> = {};
+  try {
+    server = JSON.parse(readFileSync(stateFile, "utf8"));
+  } catch {
+    // 壊れたファイルは、動いているサーバーがないのと同じに扱う。
+  }
+  if (server.pid !== undefined && isServer(server.pid)) return server as Server;
+  rmSync(stateFile, { force: true });
+  return undefined;
+}
+
+async function healthStatus(): Promise<number | undefined> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(1000) });
+    return response.status;
+  } catch {
+    return undefined;
+  }
+}
+
+function spawnServer(args: string[]): number | undefined {
+  if (process.platform !== "win32") {
+    const server = Bun.spawn(["llama-server", ...args], { cwd: stateDir, stdio: ["ignore", "ignore", "ignore"], detached: true });
+    server.unref();
+    return server.pid;
+  }
+  // Bun.spawn の子は呼び出し元のパイプのハンドルまで受け継ぎ、サーバーが動いている間 `bun run serve start | ...` が
+  // 終わらなくなる。Start-Process はハンドルを継承させない ShellExecute で起動する。
+  const { stdout, exitCode } = Bun.spawnSync(
+    ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+      "(Start-Process llama-server -ArgumentList $env:SERVER_ARGS -WorkingDirectory $env:SERVER_CWD -WindowStyle Hidden -PassThru).Id"],
+    { env: { ...process.env, SERVER_ARGS: args.map((arg) => `"${arg}"`).join(" "), SERVER_CWD: stateDir }, stderr: "inherit" },
+  );
+  const pid = Number(stdout.toString());
+  return exitCode === 0 && Number.isInteger(pid) && pid > 0 ? pid : undefined;
+}
+
+async function waitUntilListening(pid: number): Promise<boolean> {
+  let announced = false;
+  while (isServer(pid)) {
+    if ((await healthStatus()) === 200) {
+      // ポートを取れなかったサーバーは、そのポートにいる別のサーバーの 200 を受けた時点ではまだ終了していないことがある。
+      await Bun.sleep(500);
+      return isServer(pid);
+    }
+    if (!announced) {
+      console.log(`Waiting for the server to load (pid ${pid}). Interrupting this leaves it running; use "bun run serve stop" to stop it.`);
+      announced = true;
+    }
+    await Bun.sleep(200);
+  }
+  return false;
+}
+
+async function launch(size: string, args: string[]): Promise<Server> {
+  // モデルの取得には時間がかかるので、ポートの確認は取得のあと、起動の直前に行う。
+  if ((await healthStatus()) !== undefined) throw new Failure(`Another server is already listening on port ${port}.`);
+  // 失敗の原因を読むときに前回のログを読まないよう、先に消す。引数の解析エラーなどはログに書かれない。
+  rmSync(logFile, { force: true });
+  const pid = spawnServer(args);
+  if (pid === undefined) throw new Failure("Could not start llama-server.");
+  const server = { pid, size, quant };
+  await Bun.write(stateFile, JSON.stringify(server));
+  return server;
+}
+
+async function start(size: string) {
+  requireCommand("llama-server");
+
+  const dir = join(import.meta.dir, "models", `plamo-3-translate-${size}-GGUF`);
+  const ggufName = `plamo-3-translate-${size}-${quant}.gguf`;
+  const gguf = join(dir, ggufName);
+  const template = join(dir, "chat_template.jinja");
+  // GGUF に埋め込まれたテンプレートは古いので、同梱の chat_template.jinja を必ず使う（モデルカードの指示）。
+  // -c は 4 スロットで割られる。1 スロット 16384 トークンあれば、長い段落でも入力と訳の両方が収まる。
+  const args = [
+    "-m", gguf,
+    "--chat-template-file", template,
+    "--no-prefill-assistant",
+    "--alias", "plamo-3-translate",
+    "-c", "65536",
+    "--parallel", "4",
+    "--host", "127.0.0.1",
+    "--port", port,
+    "--log-file", logFile,
+    "--log-colors", "off",
+  ];
+
+  let server = await withLock(runningServer);
+  if (server === undefined) {
+    if (!(await Bun.file(gguf).exists()) || !(await Bun.file(template).exists())) {
+      requireCommand("uvx");
+      const download = Bun.spawn([
+        "uvx", "--from", "huggingface_hub", "hf", "download", `pfnet/plamo-3-translate-${size}-GGUF`, ggufName,
+        "chat_template.jinja", "LICENSE/ja", "LICENSE/en", "--local-dir", dir,
+      ], { stdio: ["inherit", "inherit", "inherit"] });
+      const status = await download.exited;
+      if (status !== 0) process.exit(status);
+    }
+    server = await withLock(async () => runningServer() ?? await launch(size, args));
+  }
+
+  if (server.size !== size || server.quant !== quant) {
+    throw new Failure(`Already running ${server.size} ${server.quant} on port ${port} (pid ${server.pid}). To change the settings, run stop first.`);
+  }
+  if (!(await waitUntilListening(server.pid))) {
+    await withLock(runningServer);
+    throw new Failure(existsSync(logFile)
+      ? `llama-server exited during startup. See ${logFile}`
+      : `llama-server exited during startup without writing a log. Run it directly to see the error:\nllama-server ${args.join(" ")}`);
+  }
+  console.log(`Listening on http://127.0.0.1:${port} (pid ${server.pid}). Log: ${logFile}`);
+}
+
+function kill(pid: number, signal: NodeJS.Signals) {
+  try {
+    process.kill(pid, signal);
+  } catch (error) {
+    // 確かめてから送るまでの間に終了していれば、止める目的は果たせている。
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+}
+
+async function stop() {
+  const server = await withLock(runningServer);
+  if (server === undefined) {
+    if ((await healthStatus()) !== undefined) throw new Failure(`Port ${port} is answered by a server that this command did not start.`);
+    console.log("Not running.");
+    return;
+  }
+  // Windows ではこの SIGTERM も強制終了になる。llama-server に保存する状態はないので、どちらでも問題ない。
+  kill(server.pid, "SIGTERM");
+  const deadline = Date.now() + 10_000;
+  while (isServer(server.pid) && Date.now() < deadline) await Bun.sleep(100);
+  if (isServer(server.pid)) kill(server.pid, "SIGKILL");
+  while (isServer(server.pid)) await Bun.sleep(100);
+  await withLock(runningServer);
+  console.log(`Stopped (pid ${server.pid}).`);
+}
+
+const [command, size = "2b"] = process.argv.slice(2);
+try {
+  if (command === "start" && sizes.includes(size)) {
+    await start(size);
+  } else if (command === "stop") {
+    await stop();
+  } else {
+    throw new Failure(usage);
+  }
+} catch (error) {
+  if (!(error instanceof Failure)) throw error;
+  console.error(error.message);
+  process.exit(1);
+}
