@@ -42,6 +42,8 @@ bun run serve stop
 
 環境変数は、Mac では `PORT=8001 bun run serve start`、Windows の PowerShell では `$env:PORT = 8001; bun run serve start` のように渡す。
 
+`serve.ts` を書き換えたら `bun test` で確かめる。`llama-server` もモデルも要らない。
+
 ## KISS Translator に API を足す
 
 Chrome ウェブストアか [Releases](https://github.com/fishjar/kiss-translator/releases) から KISS Translator を入れ、設定ファイルのインポートか手入力で API を足す。画面の名前は KISS Translator v2.1.1 の日本語表示に合わせている。
