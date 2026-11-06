@@ -1,4 +1,4 @@
-// PLaMo 3 Translate の OpenAI 互換 API サーバーを、バックグラウンドで起動・停止する。
+// PLaMo 3 Translate の OpenAI 互換 API サーバーを、バックグラウンドで起動・停止し、状態を表示する。
 // 使い方: bun run serve start [2b|8b|0.8b|31b]   (既定 2b、ポート 21434)
 //         bun run serve stop
 //         bun run serve status
@@ -69,7 +69,7 @@ async function withLock<T>(action: () => Promise<T> | T): Promise<T> {
 function liveServer(file: string): Server | undefined {
   let server: Partial<Server> = {};
   try {
-    server = JSON.parse(readFileSync(file, "utf8"));
+    server = JSON.parse(readFileSync(file, "utf8")) ?? {};
   } catch {
     // ないファイルや壊れたファイルは、動いているサーバーがないのと同じに扱う。
   }
@@ -201,10 +201,12 @@ function kill(pid: number, signal: NodeJS.Signals) {
   }
 }
 
+const foreignServer = (target: string) => `Port ${target} is answered by a server that this command did not start.`;
+
 async function stop() {
   const server = await withLock(runningServer);
   if (server === undefined) {
-    if ((await healthStatus()) !== undefined) throw new Failure(`Port ${port} is answered by a server that this command did not start.`);
+    if ((await healthStatus()) !== undefined) throw new Failure(foreignServer(port));
     console.log("Not running.");
     return;
   }
@@ -224,23 +226,25 @@ async function status() {
   const files = existsSync(stateDir) ? readdirSync(stateDir) : [];
   const saved = files.flatMap((file) => /^(\d+)\.json$/.exec(file)?.[1] ?? []);
   const targets = process.env.PORT ? [port] : [...new Set([port, ...saved])];
-  let reported = false;
+  const lines: string[] = [];
   let ready = false;
   for (const target of targets) {
     const server = liveServer(join(stateDir, `${target}.json`));
     const answer = await healthStatus(target);
     const url = `http://${host}:${target}`;
-    if (server !== undefined) {
-      const details = `(${server.size} ${server.quant}, pid ${server.pid})`;
-      ready ||= answer === 200;
-      console.log(answer === 200 ? `Running: listening on ${url} ${details}.` : `Starting: ${url} is not ready yet ${details}.`);
-      reported = true;
-    } else if (answer !== undefined) {
-      console.log(`Port ${target} is answered by a server that this command did not start.`);
-      reported = true;
+    if (server === undefined) {
+      if (answer !== undefined) lines.push(foreignServer(target));
+      continue;
+    }
+    const details = `(${server.size} ${server.quant}, pid ${server.pid})`;
+    if (answer === 200) {
+      ready = true;
+      lines.push(`Running: listening on ${url} ${details}.`);
+    } else {
+      lines.push(`Starting: ${url} is not ready yet ${details}.`);
     }
   }
-  if (!reported) console.log("Not running.");
+  console.log(lines.join("\n") || "Not running.");
   if (!ready) process.exitCode = 1;
 }
 

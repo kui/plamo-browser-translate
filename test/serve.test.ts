@@ -248,10 +248,12 @@ test("a stale state file does not stop start or kill the other process", async (
 test("a broken state file is treated as no server", async () => {
   const dir = makeCheckout("a");
   mkdirSync(join(home, ".cache", "plamo-browser-translate"), { recursive: true });
-  writeFileSync(stateFile(), "garbage");
-  const stopped = await serve(dir, ["stop"]);
-  expect(stopped.output).toContain("Not running");
-  expect(existsSync(stateFile())).toBe(false);
+  for (const content of ["garbage", "null"]) {
+    writeFileSync(stateFile(), content);
+    const stopped = await serve(dir, ["stop"]);
+    expect(stopped.output).toContain("Not running");
+    expect(existsSync(stateFile())).toBe(false);
+  }
 });
 
 test("start reports a port held by another server and stop does not claim it is free", async () => {
@@ -422,10 +424,12 @@ test("status ignores a stale state file and leaves it alone", async () => {
   mkdirSync(join(home, ".cache", "plamo-browser-translate"), { recursive: true });
   writeFileSync(stateFile(), JSON.stringify({ pid: process.pid, size: "2b", quant: "Q4_K_M" }));
   const result = await serve(dir, ["status"]);
+  const kept = existsSync(stateFile());
+  // afterEach が、ファイルにある pid（このテストのプロセス）を強制終了しないよう、expect の前に消す。
+  rmSync(stateFile());
   expect(result.output).toContain("Not running");
   expect(result.code).toBe(1);
-  expect(existsSync(stateFile())).toBe(true);
-  rmSync(stateFile());
+  expect(kept).toBe(true);
 });
 
 test("status finds servers on any port unless PORT narrows it", async () => {
