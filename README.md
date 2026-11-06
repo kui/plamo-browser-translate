@@ -30,6 +30,7 @@
 | やりたいこと | すること |
 |---|---|
 | サーバーを止める | `bun run serve stop` |
+| サーバーの状態とアドレス・ポートを確かめる | `bun run serve status`。`PORT` を指定しなければ全ポートのサーバーを表示する。翻訳を受け付けるサーバーがあるときだけ、終了コードが 0 になる |
 | モデルを変える | 止めてから `bun run serve start 8b`（`0.8b`、`2b`、`8b`、`31b`。速さなら小さいもの、質なら大きいもの） |
 | 今の API を残して設定ファイルを作る | **概要** → **エクスポート** で保存し、`bun run kiss-import <保存したファイル>`。どちらのファイルにもほかの API のキーが入っているので、公開しない |
 | ログオン時に自動で起動する（Windows） | `bun run autostart install`（モデルは `bun run autostart install 8b` のように選ぶ） |
@@ -40,12 +41,6 @@
 ## 設定
 
 環境変数で変える。Mac は `PORT=8001 bun run serve start`、PowerShell は `$env:PORT = 8001; bun run serve start` のように渡す。`bun run autostart install` を実行したときの値は、自動起動にも使われる。
-
-状態と待ち受けのアドレス・ポートは次で確認する。どのワークツリーからでも確認でき、`PORT` を指定しなければ全ポートのサーバーを表示する。翻訳を受け付けるサーバーがあるときだけ、終了コードが 0 になる。
-
-```bash
-bun run serve status
-```
 
 | 変数 | 既定値 | 意味 |
 |---|---|---|
