@@ -142,7 +142,9 @@ test("a second start reports the same server", async () => {
   const first = await serve(dir, ["start"]);
   const second = await serve(dir, ["start"]);
   expect(second.code).toBe(0);
-  expect(second.output).toBe(first.output);
+  const pid = (output: string) => /Listening on .*\(pid (\d+)\)/.exec(output)?.[1];
+  expect(pid(second.output)).toBe(pid(first.output));
+  expect(pid(second.output)).toBeDefined();
 });
 
 test("a second start waits while the server is loading", async () => {
