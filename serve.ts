@@ -1,11 +1,13 @@
 // PLaMo 3 Translate の OpenAI 互換 API サーバーを、バックグラウンドで起動・停止する。
 // 使い方: bun run serve start [2b|8b|0.8b|31b]   (既定 2b、ポート 8000)
 //         bun run serve stop
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 type Server = { pid: number; size: string; quant: string };
+
+class Failure extends Error {}
 
 const sizes = ["0.8b", "2b", "8b", "31b"];
 const usage = `Usage: bun run serve start [${sizes.join("|")}] | stop`;
@@ -13,10 +15,11 @@ const port = process.env.PORT || "8000";
 const quant = process.env.QUANT || "Q4_K_M";
 // ポートはマシン全体で 1 つなので、状態もワークツリーではなくポートごとに持つ。どのワークツリーからでも同じサーバーを扱える。
 const stateDir = join(homedir(), ".cache", "plamo-browser-translate");
-const stateFile = join(stateDir, `${port}.pid`);
+const stateFile = join(stateDir, `${port}.json`);
+const lockDir = join(stateDir, `${port}.lock`);
 const logFile = join(stateDir, `${port}.log`);
-// spawn より前に状態ファイルを作るので、作った start が中断すると pid のないまま残る。起動にかかる時間より十分長く待って見切る。
-const claimTimeoutMs = 30_000;
+// ロックの中でするのは状態の確認とサーバーの起動だけ。保持したまま落ちた場合に備え、それより十分長く待って奪う。
+const staleLockMs = 30_000;
 
 // bun の fetch は 127.0.0.1 宛てでも HTTP_PROXY を使うので、プロキシの応答をサーバーの応答と取り違える。
 process.env.NO_PROXY = [process.env.NO_PROXY, "127.0.0.1"].filter(Boolean).join(",");
@@ -36,53 +39,39 @@ function isServer(pid: number): boolean {
   return Bun.spawnSync(command).stdout.toString().includes("llama-server");
 }
 
-function readStateFile(): { fields: Partial<Server>; mtimeMs: number } | undefined {
-  try {
-    const text = readFileSync(stateFile, "utf8");
-    const { mtimeMs } = statSync(stateFile);
-    try {
-      return { fields: JSON.parse(text), mtimeMs };
-    } catch {
-      return { fields: {}, mtimeMs };
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
-}
-
-function forgetServer(pid: number) {
-  if (readStateFile()?.fields.pid === pid) rmSync(stateFile, { force: true });
-}
-
-async function runningServer(): Promise<Server | undefined> {
-  for (;;) {
-    const state = readStateFile();
-    if (state === undefined) return undefined;
-    if (state.fields.pid !== undefined) {
-      if (isServer(state.fields.pid)) return state.fields as Server;
-      forgetServer(state.fields.pid);
-      return undefined;
-    }
-    if (Date.now() - state.mtimeMs > claimTimeoutMs) {
-      rmSync(stateFile, { force: true });
-      return undefined;
-    }
-    await Bun.sleep(100);
-  }
-}
-
-function claim(size: string): boolean {
+// 状態ファイルは、同時に動く start や stop に壊されないよう、必ずこの中で読み書きする。
+async function withLock<T>(action: () => Promise<T> | T): Promise<T> {
   mkdirSync(stateDir, { recursive: true });
-  try {
-    const file = openSync(stateFile, "wx");
-    writeSync(file, JSON.stringify({ size, quant }));
-    closeSync(file);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
-    throw error;
+  for (;;) {
+    try {
+      mkdirSync(lockDir);
+      break;
+    } catch (error) {
+      // Windows では、削除中のフォルダを作ろうとすると EPERM になる。
+      if (!["EEXIST", "EPERM"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+    }
+    const lock = statSync(lockDir, { throwIfNoEntry: false });
+    if (lock && Date.now() - lock.mtimeMs > staleLockMs) rmSync(lockDir, { recursive: true, force: true, maxRetries: 5 });
+    await Bun.sleep(50);
   }
+  try {
+    return await action();
+  } finally {
+    rmSync(lockDir, { recursive: true, force: true, maxRetries: 5 });
+  }
+}
+
+function runningServer(): Server | undefined {
+  if (!existsSync(stateFile)) return undefined;
+  let server: Partial<Server> = {};
+  try {
+    server = JSON.parse(readFileSync(stateFile, "utf8"));
+  } catch {
+    // 壊れたファイルは、動いているサーバーがないのと同じに扱う。
+  }
+  if (server.pid !== undefined && isServer(server.pid)) return server as Server;
+  rmSync(stateFile, { force: true });
+  return undefined;
 }
 
 async function healthStatus(): Promise<number | undefined> {
@@ -130,19 +119,11 @@ async function waitUntilListening(pid: number): Promise<boolean> {
 
 async function launch(size: string, args: string[]): Promise<Server> {
   // モデルの取得には時間がかかるので、ポートの確認は取得のあと、起動の直前に行う。
-  if ((await healthStatus()) !== undefined) {
-    rmSync(stateFile, { force: true });
-    console.error(`Another server is already listening on port ${port}.`);
-    process.exit(1);
-  }
+  if ((await healthStatus()) !== undefined) throw new Failure(`Another server is already listening on port ${port}.`);
   // 失敗の原因を読むときに前回のログを読まないよう、先に消す。引数の解析エラーなどはログに書かれない。
   rmSync(logFile, { force: true });
   const pid = spawnServer(args);
-  if (pid === undefined) {
-    rmSync(stateFile, { force: true });
-    console.error("Could not start llama-server.");
-    process.exit(1);
-  }
+  if (pid === undefined) throw new Failure("Could not start llama-server.");
   const server = { pid, size, quant };
   await Bun.write(stateFile, JSON.stringify(server));
   return server;
@@ -170,7 +151,7 @@ async function start(size: string) {
     "--log-colors", "off",
   ];
 
-  let server = await runningServer();
+  let server = await withLock(runningServer);
   if (server === undefined) {
     if (!(await Bun.file(gguf).exists()) || !(await Bun.file(template).exists())) {
       requireCommand("uvx");
@@ -181,20 +162,17 @@ async function start(size: string) {
       const status = await download.exited;
       if (status !== 0) process.exit(status);
     }
-    while (server === undefined && !claim(size)) server = await runningServer();
-    server ??= await launch(size, args);
+    server = await withLock(async () => runningServer() ?? await launch(size, args));
   }
 
   if (server.size !== size || server.quant !== quant) {
-    console.error(`Already running ${server.size} ${server.quant} on port ${port} (pid ${server.pid}). To change the settings, run stop first.`);
-    process.exit(1);
+    throw new Failure(`Already running ${server.size} ${server.quant} on port ${port} (pid ${server.pid}). To change the settings, run stop first.`);
   }
   if (!(await waitUntilListening(server.pid))) {
-    forgetServer(server.pid);
-    console.error(existsSync(logFile)
+    await withLock(runningServer);
+    throw new Failure(existsSync(logFile)
       ? `llama-server exited during startup. See ${logFile}`
       : `llama-server exited during startup without writing a log. Run it directly to see the error:\nllama-server ${args.join(" ")}`);
-    process.exit(1);
   }
   console.log(`Listening on http://127.0.0.1:${port} (pid ${server.pid}). Log: ${logFile}`);
 }
@@ -209,12 +187,9 @@ function kill(pid: number, signal: NodeJS.Signals) {
 }
 
 async function stop() {
-  const server = await runningServer();
+  const server = await withLock(runningServer);
   if (server === undefined) {
-    if ((await healthStatus()) !== undefined) {
-      console.error(`Port ${port} is answered by a server that this command did not start.`);
-      process.exit(1);
-    }
+    if ((await healthStatus()) !== undefined) throw new Failure(`Port ${port} is answered by a server that this command did not start.`);
     console.log("Not running.");
     return;
   }
@@ -224,16 +199,21 @@ async function stop() {
   while (isServer(server.pid) && Date.now() < deadline) await Bun.sleep(100);
   if (isServer(server.pid)) kill(server.pid, "SIGKILL");
   while (isServer(server.pid)) await Bun.sleep(100);
-  forgetServer(server.pid);
+  await withLock(runningServer);
   console.log(`Stopped (pid ${server.pid}).`);
 }
 
 const [command, size = "2b"] = process.argv.slice(2);
-if (command === "start" && sizes.includes(size)) {
-  await start(size);
-} else if (command === "stop") {
-  await stop();
-} else {
-  console.error(usage);
+try {
+  if (command === "start" && sizes.includes(size)) {
+    await start(size);
+  } else if (command === "stop") {
+    await stop();
+  } else {
+    throw new Failure(usage);
+  }
+} catch (error) {
+  if (!(error instanceof Failure)) throw error;
+  console.error(error.message);
   process.exit(1);
 }
