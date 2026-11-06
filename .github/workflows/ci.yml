@@ -25,5 +25,6 @@ jobs:
           install_args: bun
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
+      - run: bun test
       - run: bun run kiss-import --fresh
       - run: bun run verify --offline

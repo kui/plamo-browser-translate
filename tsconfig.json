@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["*.ts", "kiss/*.ts"]
+  "include": ["*.ts", "kiss/*.ts", "test/*.ts"]
 }
