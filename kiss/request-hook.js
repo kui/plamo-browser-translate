@@ -17,6 +17,9 @@ async (args) => {
     throw new Error("PLaMo 3 Translate does not support target language: " + args.toLang);
   }
   const kwargs = { target_lang: target };
+  // やさしい日本語で訳すなら、次の行のコメントを外す。ja(easy) はモデルカードになく、chat_template.jinja が受け付ける値。
+  // 日本語のページは KISS の「原文の言語」を日本語にしないと訳されない。訳したことのある文は KISS のキャッシュをクリアするまで前の訳が出る。
+  // if (target === "ja") kwargs.target_lang = "ja(easy)";
   if (args.fromLang && args.fromLang !== "auto" && supported.indexOf(toCode(args.fromLang)) >= 0) {
     kwargs.source_lang = toCode(args.fromLang);
   }

@@ -19,18 +19,21 @@ type Case = {
   text: string;
   kwargs: Record<string, string>;
   lang: (translation: string) => boolean;
+  hook?: ReqHook;
 };
 
 const offline = process.argv.slice(2).includes("--offline");
 const url = process.env.URL || "http://127.0.0.1:21434/v1/chat/completions";
 const source = (file: string) => Bun.file(join(import.meta.dir, file)).text();
-const load = async <T>(name: string, file: string): Promise<T> => {
+const compile = <T>(name: string, code: string): T => {
   const interp = new Sval({ ecmaVer: "latest", sourceType: "script", sandBox: true });
-  interp.run(`exports.${name} = ${await source(file)}`);
+  interp.run(`exports.${name} = ${code}`);
   return interp.exports[name] as T;
 };
-const reqHook = await load<ReqHook>("reqHook", "request-hook.js");
-const resHook = await load<ResHook>("resHook", "response-hook.js");
+const reqHook = compile<ReqHook>("reqHook", await source("request-hook.js"));
+const resHook = compile<ResHook>("resHook", await source("response-hook.js"));
+// ja(easy) の行のコメントを外したフック。コメントのままだと壊れても気づけないので、ここで実行する。
+const easyReqHook = compile<ReqHook>("reqHook", (await source("request-hook.js")).replace('// if (target === "ja")', 'if (target === "ja")'));
 
 let failed = 0;
 const check = (ok: boolean, label: string, detail = "") => {
@@ -119,11 +122,19 @@ const cases: Case[] = [
     fromLang: "auto", toLang: "ja", text: "PLaMo uses <|plamo:tag|> and <|plamo:msg|> in its prompt format.",
     kwargs: { target_lang: "ja" }, lang: (s) => hasKana(s) && s.includes("<|plamo:tag|>") && s.includes("<|plamo:msg|>"),
   },
+  {
+    fromLang: "ja", toLang: "ja", text: "地震発生時には、速やかに安全な場所へ避難してください。", hook: easyReqHook,
+    kwargs: { target_lang: "ja(easy)", source_lang: "ja" }, lang: (s) => hasKana(s) && !s.includes("速やか"),
+  },
+  {
+    fromLang: "auto", toLang: "en", text: "地震が起きました。", hook: easyReqHook,
+    kwargs: { target_lang: "en" }, lang: (s) => /[a-z]/i.test(s) && !hasKana(s),
+  },
 ];
 
 for (const c of cases) {
   const label = `${c.fromLang}->${c.toLang}`;
-  const req = await reqHook({ url, texts: [c.text], fromLang: c.fromLang, toLang: c.toLang });
+  const req = await (c.hook ?? reqHook)({ url, texts: [c.text], fromLang: c.fromLang, toLang: c.toLang });
   const sent = JSON.stringify(req.body.chat_template_kwargs);
   const kwargsOk = sent === JSON.stringify(c.kwargs);
   check(kwargsOk, `${label} kwargs`, kwargsOk ? "" : `sent ${sent}, want ${JSON.stringify(c.kwargs)}`);
