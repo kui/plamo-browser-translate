@@ -1,5 +1,5 @@
 // PLaMo 3 Translate の OpenAI 互換 API サーバーを、バックグラウンドで起動・停止する。
-// 使い方: bun run serve start [2b|8b|0.8b|31b]   (既定 2b、ポート 8000)
+// 使い方: bun run serve start [2b|8b|0.8b|31b]   (既定 2b、ポート 21434)
 //         bun run serve stop
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -11,8 +11,9 @@ class Failure extends Error {}
 
 const sizes = ["0.8b", "2b", "8b", "31b"];
 const usage = `Usage: bun run serve start [${sizes.join("|")}] | stop`;
-const port = process.env.PORT || "8000";
+const port = process.env.PORT || "21434";
 const quant = process.env.QUANT || "Q4_K_M";
+const sleepIdleSeconds = process.env.SLEEP_IDLE_SECONDS || "300";
 // ポートはマシン全体で 1 つなので、状態もワークツリーではなくポートごとに持つ。どのワークツリーからでも同じサーバーを扱える。
 const stateDir = join(homedir(), ".cache", "plamo-browser-translate");
 const stateFile = join(stateDir, `${port}.json`);
@@ -145,6 +146,7 @@ async function start(size: string) {
     "--alias", "plamo-3-translate",
     "-c", "65536",
     "--parallel", "4",
+    "--sleep-idle-seconds", sleepIdleSeconds,
     "--host", "127.0.0.1",
     "--port", port,
     "--log-file", logFile,

@@ -20,7 +20,7 @@ PLaMo 3 Translate は翻訳先の言語を指示文ではなく `chat_template_k
 bun run serve start
 ```
 
-初回はモデル（2B の Q4_K_M、約 1.8 GB）を `models/` に取得する。サーバーはバックグラウンドで動き、`http://127.0.0.1:8000` で応答するようになると、コマンドは終了する。ターミナルを閉じてもサーバーは止まらない。サーバーの出力は、ホームの `.cache/plamo-browser-translate/<ポート>.log` に書かれる。
+初回はモデル（2B の Q4_K_M、約 1.8 GB）を `models/` に取得する。サーバーはバックグラウンドで動き、`http://127.0.0.1:21434` で応答するようになると、コマンドは終了する。ターミナルを閉じてもサーバーは止まらない。サーバーの出力は、ホームの `.cache/plamo-browser-translate/<ポート>.log` に書かれる。
 
 モデルのサイズは引数で選べる。
 
@@ -38,11 +38,35 @@ bun run serve stop
 |---|---|---|
 | `start` の引数 | `2b` | `0.8b`、`2b`、`8b`、`31b` |
 | `QUANT` | `Q4_K_M` | GGUF の量子化。リポジトリにあるものを指定する |
-| `PORT` | `8000` | 待ち受けポート。変えたら、`bun run serve stop` にも同じ `PORT` を、`bun run kiss-import` と `bun run verify` には環境変数 `URL` で同じポートの URL を渡す |
+| `PORT` | `21434` | 待ち受けポート。変えたら、`bun run serve stop` にも同じ `PORT` を、`bun run kiss-import` と `bun run verify` には環境変数 `URL` で同じポートの URL を渡す |
+| `SLEEP_IDLE_SECONDS` | `300` | この秒数だけ使われないと、モデルをメモリから外す。`-1` で無効 |
 
 環境変数は、Mac では `PORT=8001 bun run serve start`、Windows の PowerShell では `$env:PORT = 8001; bun run serve start` のように渡す。
 
+使われない間はモデルがメモリから外れるので、サーバーを止めなくてもゲームなどにメモリを空けられる。プロセスは待ち受けを続け、次の翻訳リクエストでモデルを読み込み直す。2B のモデルなら、その 1 回だけ数秒余分にかかる。
+
 `serve.ts` を書き換えたら `bun test` で確かめる。`llama-server` もモデルも要らない。
+
+## ログオン時に自動で起動する（Windows）
+
+タスクスケジューラに `bun run serve start` を登録すると、ログオンのたびにウィンドウを出さずに起動する。登録の前に一度起動して、動くことを確かめる。
+
+```bash
+bun run autostart install
+```
+
+モデルのサイズは `bun run autostart install 8b` のように選べる。そのとき設定されている `QUANT`、`PORT`、`SLEEP_IDLE_SECONDS`、`MODELS_DIR` も引き継ぎ、登録した値を表示する。変えるときは、`bun run serve stop` で止めてから `install` をやり直す。
+
+登録を消すときは次を実行する。動いているサーバーは止まらないので、止めるときは `bun run serve stop` を実行する。
+
+```bash
+bun run autostart uninstall
+```
+
+- 今すぐ止めるときは `bun run serve stop` を実行する。次のログオンでまた起動する。`PORT` を変えているなら、同じ `PORT` を渡す。
+- ログオン時の `bun run serve start` の出力は `serve.log` に書かれる。起動しないときはここを見る。
+- タスクは `bun` と `llama-server` を、ユーザー環境変数の `PATH` から探す。mise は [shims を `PATH` に入れる](https://mise.jdx.dev/dev-tools/shims.html)。シェルのプロファイルで有効化するだけだと、タスクから `bun` が見つからない。
+- 登録したフォルダーのファイルを使うので、リポジトリを動かしたら `install` をやり直す。
 
 ## KISS Translator に API を足す
 
@@ -80,7 +104,7 @@ Chrome ウェブストアか [Releases](https://github.com/fishjar/kiss-translat
 インポートで入るのと同じ値を、画面で設定する。
 
 1. 拡張の設定画面で **翻訳サービス** を開き、**追加** → **Custom** で API を追加する。
-2. URL に `http://127.0.0.1:8000/v1/chat/completions` を入れる。
+2. URL に `http://127.0.0.1:21434/v1/chat/completions` を入れる。
 3. **Request Hook** に [`kiss/request-hook.js`](kiss/request-hook.js) の中身を貼る。
 4. **Response Hook** に [`kiss/response-hook.js`](kiss/response-hook.js) の中身を貼る。
 5. **翻訳プロンプト** で **[单句] 単文翻訳 (Concise)** など単文翻訳のプロンプトを選ぶ。一括翻訳のプロンプトを選ぶと複数段落が 1 リクエストに入り、先頭の段落しか訳されない。

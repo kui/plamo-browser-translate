@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "serve": "bun serve.ts",
+    "autostart": "bun autostart.ts",
     "verify": "bun kiss/verify.ts",
     "kiss-import": "bun kiss/build-import.ts",
     "typecheck": "bun check"
