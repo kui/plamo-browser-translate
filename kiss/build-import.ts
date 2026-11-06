@@ -23,7 +23,7 @@ if (!input) {
   process.exit(2);
 }
 
-const url = process.env.URL || "http://127.0.0.1:8000/v1/chat/completions";
+const url = process.env.URL || "http://127.0.0.1:21434/v1/chat/completions";
 const hook = async (file: string) => (await Bun.file(join(import.meta.dir, file)).text()).trim();
 const setting: Setting = await Bun.file(input).json();
 const apis = setting.transApis;
