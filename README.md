@@ -36,7 +36,7 @@
 | ログオン時に自動で起動する（Windows） | `bun run autostart install`（モデルは `bun run autostart install 8b` のように選ぶ） |
 | 自動起動をやめる | `bun run autostart uninstall`。実行中のサーバーは `bun run serve stop` で止める |
 | フックを書き換えて確かめる | サーバーを起動して `bun install`、`bun run verify` |
-| `serve.ts` や `autostart.ts` を書き換えて確かめる | `bun test` |
+| `serve.ts` や `autostart.ts` を書き換えて確かめる | `bun install` のあと `bun run typecheck`、`bun run lint`、`bun test`。`autostart.ts` のテストは Windows でだけ動く |
 
 ## 設定
 

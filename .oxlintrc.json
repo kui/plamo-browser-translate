@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error"
+  },
+  "overrides": [
+    {
+      // KISS Translator はフックを `exports.reqHook = <ファイルの中身>` のように評価するので、ファイルは関数式 1 つだけにする。
+      "files": ["kiss/*-hook.js"],
+      "rules": {
+        "no-unused-expressions": "off"
+      }
+    }
+  ]
+}
