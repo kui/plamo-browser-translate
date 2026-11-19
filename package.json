@@ -7,10 +7,12 @@
     "autostart": "bun autostart.ts",
     "verify": "bun kiss/verify.ts",
     "kiss-import": "bun kiss/build-import.ts",
-    "typecheck": "bun check"
+    "typecheck": "bun check",
+    "lint": "oxlint"
   },
   "devDependencies": {
     "@types/bun": "^1.4.4",
+    "oxlint": "^1.94.0",
     "sval": "^0.5.2"
   }
 }
